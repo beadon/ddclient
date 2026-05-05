@@ -22,6 +22,88 @@ On each run the workflow:
    for each supported Fedora release.
 4. Attaches all RPMs to the GitHub release as downloadable assets.
 
+### Manual dispatch
+
+The workflow can also be triggered manually without publishing a release,
+which is useful for testing packaging changes on a branch before cutting a
+release.
+
+**Via the GitHub UI:**
+
+1. Go to **Actions → Package RPM** on GitHub.
+2. Click **Run workflow**, select the branch to build from, and click
+   **Run workflow**.
+
+**Via the `gh` CLI:**
+
+```sh
+# Run against the default branch
+gh workflow run package-rpm.yml --repo ddclient/ddclient
+
+# Run against a specific branch or tag
+gh workflow run package-rpm.yml --repo ddclient/ddclient --ref my-branch
+```
+
+When triggered this way the RPMs are built and uploaded as workflow
+artifacts (visible in the Actions run summary) but are **not** attached to
+any release. The version is derived from whatever `make dist` produces on
+the selected branch.
+
+## Creating a release
+
+Publishing a release on GitHub (i.e. not a draft) automatically triggers
+the packaging workflow and attaches the resulting RPMs to the release.
+
+### Via the GitHub UI
+
+1. Go to **Releases → Draft a new release** on GitHub.
+2. Enter the tag (e.g. `v4.0.1-rc.1` or `v4.0.1`) and title.
+3. Write the release notes.
+4. For a pre-release (alpha, beta, rc), check **Set as a pre-release**.
+5. Click **Publish release**.
+
+### Via the `gh` CLI
+
+**Pre-release (alpha, beta, rc):**
+
+```sh
+gh release create v4.0.1-rc.1 \
+  --repo ddclient/ddclient \
+  --title "v4.0.1-rc.1" \
+  --notes "Release candidate 1 for v4.0.1." \
+  --prerelease
+```
+
+**Final release:**
+
+```sh
+gh release create v4.0.1 \
+  --repo ddclient/ddclient \
+  --title "v4.0.1" \
+  --notes-from-tag
+```
+
+`--notes-from-tag` uses the annotated git tag message as the release notes.
+To write notes inline use `--notes "..."` or `--notes-file changelog.md`
+instead.
+
+### Verifying the release artifacts
+
+After the workflow completes, the RPM artifacts are attached to the release
+and visible at:
+
+```
+https://github.com/ddclient/ddclient/releases/tag/v4.0.1-rc.1
+```
+
+To download and install a specific RPM on a Fedora 44 system to verify it:
+
+```sh
+curl -fsSL -O https://github.com/ddclient/ddclient/releases/download/v4.0.1-rc.1/ddclient-4.0.1-0.1.rc.1.fc44.noarch.rpm
+sudo dnf install -y ./ddclient-4.0.1-0.1.rc.1.fc44.noarch.rpm
+ddclient --version
+```
+
 ## Supported distributions
 
 | Distribution | Builds produced       |
