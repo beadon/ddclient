@@ -32,7 +32,6 @@ jobs:
               findutils \
               make \
               rpm-build \
-              rpmdevtools \
               systemd-rpm-macros \
               perl-interpreter \
               perl-Data-Dumper \
@@ -43,26 +42,26 @@ jobs:
               perl-version \
               ;
 
-      - name: Set up rpmbuild tree
-        run: rpmdev-setuptree
-
       - name: Build distribution tarball from source
         run: |
           ./autogen
           ./configure
           make dist
 
-      - name: Stage tarball and spec for rpmbuild
-        id: stage
+      - name: Build RPMs
+        id: build
         run: |
+          TOPDIR="$(pwd)/rpmbuild"
+          mkdir -p "$TOPDIR"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
           TARBALL=$(ls ddclient-*.tar.gz)
           FULL_VERSION="${TARBALL#ddclient-}"
           FULL_VERSION="${FULL_VERSION%.tar.gz}"
 
-          # Split MAJOR.MINOR.PATCH from any pre/post-release suffix.
-          # '-' suffix (alpha, beta, rc) sorts before final: Release 0.1.<label>
-          # '+' suffix (r.N re-releases) sorts after final:  Release 1.<label>
-          # No suffix is a final release:                    Release 1
+          # Translate semver suffix to RPM Version+Release.
+          # '-' suffix (pre-release) sorts before final:  Release 0.1.<label>
+          # '+' suffix (post-release) sorts after final:  Release 1.<label>
+          # No suffix is a final release:                 Release 1
           case "$FULL_VERSION" in
             *-*)
               RPM_VERSION="${FULL_VERSION%%-*}"
@@ -77,29 +76,26 @@ jobs:
               RPM_RELEASE="1%{?dist}" ;;
           esac
 
-          cp "$TARBALL" "$HOME/rpmbuild/SOURCES/"
+          cp "$TARBALL" "$TOPDIR/SOURCES/ddclient-${RPM_VERSION}.tar.gz"
           sed \
             -e "s/^Version:.*/Version:        ${RPM_VERSION}/" \
             -e "s/^Release:.*/Release:        ${RPM_RELEASE}/" \
-            packaging/rpm/ddclient.spec > "$HOME/rpmbuild/SPECS/ddclient.spec"
+            packaging/rpm/ddclient.spec > "$TOPDIR/SPECS/ddclient.spec"
+
+          rpmbuild --define "_topdir $TOPDIR" -ba "$TOPDIR/SPECS/ddclient.spec"
+
           echo "version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Build SRPM
-        run: rpmbuild -bs "$HOME/rpmbuild/SPECS/ddclient.spec"
-
-      - name: Build binary RPM
-        run: rpmbuild -bb "$HOME/rpmbuild/SPECS/ddclient.spec"
 
       - name: Collect RPMs
         run: |
           mkdir -p artifacts
-          find "$HOME/rpmbuild/RPMS" "$HOME/rpmbuild/SRPMS" -name '*.rpm' -exec cp {} artifacts/ \;
+          find rpmbuild/RPMS rpmbuild/SRPMS -name '*.rpm' -exec cp {} artifacts/ \;
           ls -lh artifacts/
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ddclient-rpm-${{ steps.stage.outputs.version }}-fc${{ matrix.fedora_version }}
+          name: ddclient-rpm-${{ steps.build.outputs.version }}-fc${{ matrix.fedora_version }}
           path: artifacts/*.rpm
 
       - name: Attach RPMs to GitHub release
@@ -107,7 +103,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ steps.stage.outputs.version }}"
+          VERSION="${{ steps.build.outputs.version }}"
           for rpm in artifacts/*.rpm; do
             gh release upload "v${VERSION}" "$rpm" --clobber
           done
