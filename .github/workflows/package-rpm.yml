@@ -52,14 +52,9 @@ jobs:
         id: build
         run: |
           # On a release event use the tag; on workflow_dispatch use the tarball name.
-          if [ "${{ github.event_name }}" = "release" ]; then
-            UPSTREAM="${{ github.event.release.tag_name }}"
-            UPSTREAM="${UPSTREAM#v}"
-          else
-            TARBALL=$(ls ddclient-*.tar.gz)
-            UPSTREAM="${TARBALL#ddclient-}"
-            UPSTREAM="${UPSTREAM%.tar.gz}"
-          fi
+          TARBALL=$(ls ddclient-*.tar.gz)
+          UPSTREAM="${TARBALL#ddclient-}"
+          UPSTREAM="${UPSTREAM%.tar.gz}"
 
           # Translate semver suffix to RPM Version+Release.
           # '-' suffix (pre-release) sorts before final:  Release 0.1.<label>
