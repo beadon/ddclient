@@ -4,10 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to package (without leading v, e.g. 4.0.0)'
-        required: true
 
 jobs:
   build-rpm:
@@ -27,17 +23,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
-          else
-            VERSION="${{ github.event.inputs.version }}"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install build dependencies
         run: |
@@ -68,28 +53,32 @@ jobs:
           make dist
 
       - name: Stage tarball and spec for rpmbuild
+        id: stage
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cp ddclient-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
+          TARBALL=$(ls ddclient-*.tar.gz)
+          VERSION="${TARBALL#ddclient-}"
+          VERSION="${VERSION%.tar.gz}"
+          cp "$TARBALL" "$HOME/rpmbuild/SOURCES/"
           sed "s/^Version:.*/Version:        ${VERSION}/" \
-              packaging/rpm/ddclient.spec > ~/rpmbuild/SPECS/ddclient.spec
+              packaging/rpm/ddclient.spec > "$HOME/rpmbuild/SPECS/ddclient.spec"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build SRPM
-        run: rpmbuild -bs ~/rpmbuild/SPECS/ddclient.spec
+        run: rpmbuild -bs "$HOME/rpmbuild/SPECS/ddclient.spec"
 
       - name: Build binary RPM
-        run: rpmbuild -bb ~/rpmbuild/SPECS/ddclient.spec
+        run: rpmbuild -bb "$HOME/rpmbuild/SPECS/ddclient.spec"
 
       - name: Collect RPMs
         run: |
           mkdir -p artifacts
-          find ~/rpmbuild/RPMS ~/rpmbuild/SRPMS -name '*.rpm' -exec cp {} artifacts/ \;
+          find "$HOME/rpmbuild/RPMS" "$HOME/rpmbuild/SRPMS" -name '*.rpm' -exec cp {} artifacts/ \;
           ls -lh artifacts/
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ddclient-rpm-${{ steps.version.outputs.version }}-fc${{ matrix.fedora_version }}
+          name: ddclient-rpm-${{ steps.stage.outputs.version }}-fc${{ matrix.fedora_version }}
           path: artifacts/*.rpm
 
       - name: Attach RPMs to GitHub release
@@ -97,7 +86,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ steps.stage.outputs.version }}"
           for rpm in artifacts/*.rpm; do
             gh release upload "v${VERSION}" "$rpm" --clobber
           done
