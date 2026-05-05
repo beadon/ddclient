@@ -54,6 +54,13 @@ Pre-release versions (leading `0.` in `Release:`) sort before the final
 release. Post-release versions sort after. This follows the
 [Fedora packaging versioning guidelines](https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/).
 
+The workflow does not validate or restrict the suffix — any string after
+`-` is treated as a pre-release label and any string after `+` is treated
+as a post-release label, passed through verbatim into `Release:`. The
+examples above reflect the suffixes defined by ddclient's versioning scheme
+(see the comment block in `ddclient.in` near `$VERSION`), but the packaging
+workflow will handle any future suffix without modification.
+
 ## Building an RPM locally
 
 Install the required tools on a Fedora system:
