@@ -56,12 +56,33 @@ jobs:
         id: stage
         run: |
           TARBALL=$(ls ddclient-*.tar.gz)
-          VERSION="${TARBALL#ddclient-}"
-          VERSION="${VERSION%.tar.gz}"
+          FULL_VERSION="${TARBALL#ddclient-}"
+          FULL_VERSION="${FULL_VERSION%.tar.gz}"
+
+          # Split MAJOR.MINOR.PATCH from any pre/post-release suffix.
+          # '-' suffix (alpha, beta, rc) sorts before final: Release 0.1.<label>
+          # '+' suffix (r.N re-releases) sorts after final:  Release 1.<label>
+          # No suffix is a final release:                    Release 1
+          case "$FULL_VERSION" in
+            *-*)
+              RPM_VERSION="${FULL_VERSION%%-*}"
+              LABEL="${FULL_VERSION#*-}"
+              RPM_RELEASE="0.1.${LABEL}%{?dist}" ;;
+            *+*)
+              RPM_VERSION="${FULL_VERSION%%+*}"
+              LABEL="${FULL_VERSION#*+}"
+              RPM_RELEASE="1.${LABEL}%{?dist}" ;;
+            *)
+              RPM_VERSION="$FULL_VERSION"
+              RPM_RELEASE="1%{?dist}" ;;
+          esac
+
           cp "$TARBALL" "$HOME/rpmbuild/SOURCES/"
-          sed "s/^Version:.*/Version:        ${VERSION}/" \
-              packaging/rpm/ddclient.spec > "$HOME/rpmbuild/SPECS/ddclient.spec"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          sed \
+            -e "s/^Version:.*/Version:        ${RPM_VERSION}/" \
+            -e "s/^Release:.*/Release:        ${RPM_RELEASE}/" \
+            packaging/rpm/ddclient.spec > "$HOME/rpmbuild/SPECS/ddclient.spec"
+          echo "version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build SRPM
         run: rpmbuild -bs "$HOME/rpmbuild/SPECS/ddclient.spec"
