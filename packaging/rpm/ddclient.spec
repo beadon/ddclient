@@ -72,7 +72,7 @@ install -D -m 0644 sample-etc_cron.d_ddclient \
 %license COPYING
 %doc README.md ChangeLog.md
 %{_bindir}/ddclient
-%config(noreplace) %{_sysconfdir}/ddclient/ddclient.conf
+%config(noreplace) %attr(0600, root, root) %{_sysconfdir}/ddclient/ddclient.conf
 %dir %{_localstatedir}/cache/ddclient
 %{_unitdir}/ddclient.service
 %{_sysconfdir}/cron.d/ddclient
