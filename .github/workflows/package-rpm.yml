@@ -22,22 +22,12 @@ jobs:
           - rawhide
 
     steps:
-      - name: Install git
-        run: dnf install -y git
-
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
-      - name: Resolve version from git tag
+      - name: Resolve version from tag
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          else
-            TAG=$(git describe --tags --abbrev=0)
-          fi
-          UPSTREAM="${TAG#v}"
+          UPSTREAM="${GITHUB_REF_NAME#v}"
 
           # Translate semver suffix to RPM Version+Release.
           # '-' suffix (pre-release) sorts before final:  Release 0.1.<label>
@@ -66,7 +56,6 @@ jobs:
           dnf --refresh install -y \
               automake \
               curl \
-              git \
               findutils \
               make \
               rpm-build \
