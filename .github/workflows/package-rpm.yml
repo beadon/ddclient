@@ -1,0 +1,103 @@
+name: Package RPM
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to package (without leading v, e.g. 4.0.0)'
+        required: true
+
+jobs:
+  build-rpm:
+    name: Build RPM (Fedora ${{ matrix.fedora_version }})
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:${{ matrix.fedora_version }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora_version:
+          - 42
+          - 43
+          - 44
+          - rawhide
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        run: |
+          dnf --refresh install -y \
+              automake \
+              curl \
+              findutils \
+              make \
+              rpm-build \
+              rpmdevtools \
+              systemd-rpm-macros \
+              perl-interpreter \
+              perl-Data-Dumper \
+              perl-File-Path \
+              perl-Getopt-Long \
+              perl-Socket \
+              perl-Sys-Hostname \
+              perl-version \
+              ;
+
+      - name: Set up rpmbuild tree
+        run: rpmdev-setuptree
+
+      - name: Build distribution tarball from source
+        run: |
+          ./autogen
+          ./configure
+          make dist
+
+      - name: Stage tarball and spec for rpmbuild
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cp ddclient-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
+          sed "s/^Version:.*/Version:        ${VERSION}/" \
+              packaging/rpm/ddclient.spec > ~/rpmbuild/SPECS/ddclient.spec
+
+      - name: Build SRPM
+        run: rpmbuild -bs ~/rpmbuild/SPECS/ddclient.spec
+
+      - name: Build binary RPM
+        run: rpmbuild -bb ~/rpmbuild/SPECS/ddclient.spec
+
+      - name: Collect RPMs
+        run: |
+          mkdir -p artifacts
+          find ~/rpmbuild/RPMS ~/rpmbuild/SRPMS -name '*.rpm' -exec cp {} artifacts/ \;
+          ls -lh artifacts/
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddclient-rpm-${{ steps.version.outputs.version }}-fc${{ matrix.fedora_version }}
+          path: artifacts/*.rpm
+
+      - name: Attach RPMs to GitHub release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          for rpm in artifacts/*.rpm; do
+            gh release upload "v${VERSION}" "$rpm" --clobber
+          done
