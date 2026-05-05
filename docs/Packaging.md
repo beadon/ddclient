@@ -31,7 +31,7 @@ On each run the workflow:
 | Fedora 44    | noarch RPM + SRPM     |
 | Fedora rawhide | noarch RPM + SRPM   |
 
-The matrix in `package-rpm.yml` should be updated each time a new Fedora
+The matrix in `.github/workflows/package-rpm.yml` should be updated each time a new Fedora
 release reaches stable and an old one reaches end-of-life. See
 <https://endoflife.date/fedora> for the current support window.
 
