@@ -1,11 +1,11 @@
 Name:           ddclient
-Version:        4.0.0
-Release:        1%{?dist}
+Version:        %{rpm_version}
+Release:        %{rpm_release}
 Summary:        Dynamic DNS client
 
 License:        GPL-2.0-or-later
 URL:            https://github.com/ddclient/ddclient
-Source0:        ddclient-%{version}.tar.gz
+Source0:        ddclient-%{upstream_version}.tar.gz
 
 BuildArch:      noarch
 
@@ -41,7 +41,7 @@ your IP address from a variety of sources.
 
 
 %prep
-%autosetup
+%autosetup -n %{name}-%{upstream_version}
 
 
 %build
