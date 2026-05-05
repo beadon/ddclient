@@ -101,9 +101,6 @@ jobs:
 
       - name: Attach RPMs to GitHub release
         if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for rpm in artifacts/*.rpm; do
-            gh release upload "${{ github.event.release.tag_name }}" "$rpm" --clobber
-          done
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.rpm
