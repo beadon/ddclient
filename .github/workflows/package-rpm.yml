@@ -63,6 +63,7 @@ jobs:
           dnf --refresh install -y \
               automake \
               curl \
+              git \
               findutils \
               make \
               rpm-build \
