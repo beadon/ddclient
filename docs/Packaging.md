@@ -8,7 +8,7 @@ and how the packaging workflow operates.
 
 ## Automated packaging
 
-A GitHub Actions workflow (`.github/workflows/package-rpm.yml`) builds and
+A GitHub Actions workflow ([`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml)) builds and
 publishes distribution packages automatically whenever a release is published
 on GitHub. It is also triggerable manually via `workflow_dispatch` for
 testing.
@@ -31,7 +31,7 @@ On each run the workflow:
 | Fedora 44    | noarch RPM + SRPM     |
 | Fedora rawhide | noarch RPM + SRPM   |
 
-The matrix in `.github/workflows/package-rpm.yml` should be updated each time a new Fedora
+The matrix in [`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml) should be updated each time a new Fedora
 release reaches stable and an old one reaches end-of-life. See
 <https://endoflife.date/fedora> for the current support window.
 
@@ -58,7 +58,7 @@ The workflow does not validate or restrict the suffix — any string after
 `-` is treated as a pre-release label and any string after `+` is treated
 as a post-release label, passed through verbatim into `Release:`. The
 examples above reflect the suffixes defined by ddclient's versioning scheme
-(see the comment block in `ddclient.in` near `$VERSION`), but the packaging
+(see the comment block in [`ddclient.in`](../ddclient.in) near `$VERSION`), but the packaging
 workflow will handle any future suffix without modification.
 
 ## Building an RPM locally
@@ -71,7 +71,7 @@ sudo dnf install -y automake curl findutils make rpm-build systemd-rpm-macros \
     perl-Socket perl-Sys-Hostname perl-version
 ```
 
-Build the distribution tarball and the RPMs:
+Build the distribution tarball and the RPMs using [`packaging/rpm/ddclient.spec`](../packaging/rpm/ddclient.spec):
 
 ```sh
 ./autogen
@@ -108,8 +108,7 @@ The resulting RPMs will be in `rpmbuild/RPMS/` and `rpmbuild/SRPMS/`.
 ### RPM-based (Fedora, AlmaLinux, RHEL)
 
 Add the new image to the `fedora_version` matrix in
-`.github/workflows/package-rpm.yml`. No changes to the spec file are
-needed.
+[`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml). No changes to the spec file are needed.
 
 ### Other package formats (Debian, Arch, etc.)
 
