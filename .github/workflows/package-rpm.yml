@@ -134,12 +134,15 @@ jobs:
           fi
 
       - name: Install build dependencies
+        # --skip-broken works around packages bundled differently across
+        # EPEL versions (e.g. perl-Sys-Hostname is part of perl-core on el8/el9)
         run: |
-          dnf --refresh install -y \
+          dnf --refresh install --skip-broken -y \
               automake \
               curl \
               findutils \
               make \
+              perl-core \
               rpm-build \
               systemd-rpm-macros \
               perl-interpreter \
