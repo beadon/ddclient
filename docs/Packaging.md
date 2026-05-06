@@ -106,16 +106,19 @@ ddclient --version
 
 ## Supported distributions
 
-| Distribution | Builds produced       |
-|--------------|-----------------------|
-| Fedora 42    | noarch RPM + SRPM     |
-| Fedora 43    | noarch RPM + SRPM     |
-| Fedora 44    | noarch RPM + SRPM     |
-| Fedora rawhide | noarch RPM + SRPM   |
+| Distribution | Container | Builds produced | EOL |
+|---|---|---|---|
+| Fedora 42 | `fedora:42` | noarch RPM + SRPM | 2026-05-27 |
+| Fedora 43 | `fedora:43` | noarch RPM + SRPM | 2026-12-09 |
+| Fedora 44 | `fedora:44` | noarch RPM + SRPM | 2027-06-02 |
+| Fedora rawhide | `fedora:rawhide` | noarch RPM + SRPM | rolling |
+| EPEL 8 (RHEL/AlmaLinux 8) | `almalinux:8` | noarch RPM + SRPM | 2029-03-01 |
+| EPEL 9 (RHEL/AlmaLinux 9) | `almalinux:9` | noarch RPM + SRPM | 2032-05-31 |
+| EPEL 10 (RHEL/AlmaLinux 10) | `almalinux:10` | noarch RPM + SRPM | 2035-05-31 |
 
-The matrix in [`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml) should be updated each time a new Fedora
-release reaches stable and an old one reaches end-of-life. See
-<https://endoflife.date/fedora> for the current support window.
+The matrices in [`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml) should be updated when Fedora releases
+reach stable or end-of-life. See <https://endoflife.date/fedora> for Fedora
+and <https://endoflife.date/almalinux> for EPEL/RHEL support windows.
 
 ## Version translation
 
