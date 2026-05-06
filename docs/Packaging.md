@@ -18,8 +18,9 @@ On each run the workflow:
 1. Checks out the source at the release tag.
 2. Builds the distribution tarball using the autotools build system
    (`./autogen && ./configure && make dist`).
-3. Builds a binary RPM and a source RPM (SRPM) inside a Fedora container
-   for each supported Fedora release.
+3. Builds a binary RPM and a source RPM (SRPM) in parallel across two jobs:
+   - `build-fedora` — runs inside `fedora:N` containers for each supported Fedora release
+   - `build-epel` — runs inside `almalinux:N` containers with EPEL and CRB/powertools enabled, for each supported EPEL release
 4. Attaches all RPMs to the GitHub release as downloadable assets.
 
 ### Manual dispatch
@@ -96,11 +97,17 @@ and visible at:
 https://github.com/ddclient/ddclient/releases/tag/v4.0.1-rc.1
 ```
 
-To download and install a specific RPM on a Fedora 44 system to verify it:
+To download and install a specific RPM to verify it:
 
 ```sh
+# Fedora 44
 curl -fsSL -O https://github.com/ddclient/ddclient/releases/download/v4.0.1-rc.1/ddclient-4.0.1-0.1.rc.1.fc44.noarch.rpm
 sudo dnf install -y ./ddclient-4.0.1-0.1.rc.1.fc44.noarch.rpm
+ddclient --version
+
+# EPEL 9 (RHEL/AlmaLinux/Rocky 9)
+curl -fsSL -O https://github.com/ddclient/ddclient/releases/download/v4.0.1-rc.1/ddclient-4.0.1-0.1.rc.1.el9.noarch.rpm
+sudo dnf install -y ./ddclient-4.0.1-0.1.rc.1.el9.noarch.rpm
 ddclient --version
 ```
 
@@ -148,12 +155,24 @@ workflow will handle any future suffix without modification.
 
 ## Building an RPM locally
 
-Install the required tools on a Fedora system:
+**On Fedora:**
 
 ```sh
 sudo dnf install -y automake curl findutils make rpm-build systemd-rpm-macros \
     perl-interpreter perl-Data-Dumper perl-File-Path perl-Getopt-Long \
     perl-Socket perl-Sys-Hostname perl-version
+```
+
+**On EPEL (RHEL/AlmaLinux/Rocky):** enable EPEL and CRB first, then install
+with `--skip-broken` since some Perl modules are bundled into `perl-core`
+rather than shipped as separate packages:
+
+```sh
+sudo dnf install -y 'dnf-command(config-manager)' epel-release
+sudo dnf config-manager --set-enabled crb   # use 'powertools' on el8
+sudo dnf install --skip-broken -y automake curl findutils make perl-core \
+    rpm-build systemd-rpm-macros perl-interpreter perl-Data-Dumper \
+    perl-File-Path perl-Getopt-Long perl-Socket perl-Sys-Hostname perl-version
 ```
 
 Build the distribution tarball and the RPMs using [`packaging/rpm/ddclient.spec`](../packaging/rpm/ddclient.spec):
@@ -192,8 +211,13 @@ The resulting RPMs will be in `rpmbuild/RPMS/` and `rpmbuild/SRPMS/`.
 
 ### RPM-based (Fedora, AlmaLinux, RHEL)
 
-Add the new image to the `fedora_version` matrix in
-[`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml). No changes to the spec file are needed.
+For a new **Fedora** release, add the version number to the `fedora_version`
+matrix in the `build-fedora` job in
+[`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml).
+
+For a new **EPEL** release (RHEL/AlmaLinux/Rocky), add the major version to
+the `epel_version` matrix in the `build-epel` job. No changes to the spec
+file are needed in either case.
 
 ### Other package formats (Debian, Arch, etc.)
 
