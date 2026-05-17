@@ -75,9 +75,9 @@ jobs:
             *-*)
               BASE="${UPSTREAM%%-*}"
               LABEL="${UPSTREAM#*-}"
-              DEB_VERSION="${BASE}~${LABEL}-1~${CODENAME}1" ;;
+              DEB_VERSION="${BASE}~${LABEL}-1+${CODENAME}1" ;;
             *)
-              DEB_VERSION="${UPSTREAM}-1~${CODENAME}1" ;;
+              DEB_VERSION="${UPSTREAM}-1+${CODENAME}1" ;;
           esac
 
           SRCDIR="ddclient-${UPSTREAM}"
@@ -174,9 +174,9 @@ jobs:
             *-*)
               BASE="${UPSTREAM%%-*}"
               LABEL="${UPSTREAM#*-}"
-              DEB_VERSION="${BASE}~${LABEL}-1~${CODENAME}1" ;;
+              DEB_VERSION="${BASE}~${LABEL}-1+${CODENAME}1" ;;
             *)
-              DEB_VERSION="${UPSTREAM}-1~${CODENAME}1" ;;
+              DEB_VERSION="${UPSTREAM}-1+${CODENAME}1" ;;
           esac
 
           SRCDIR="ddclient-${UPSTREAM}"
