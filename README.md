@@ -35,6 +35,7 @@ Dynamic DNS services currently supported include:
   * [Freemyip](https://freemyip.com)
   * [Gandi](https://gandi.net)
   * [GoDaddy](https://www.godaddy.com)
+  * [Hetzner](https://hetzner.com)
   * [Hurricane Electric](https://dns.he.net)
   * [Infomaniak](https://faq.infomaniak.com/2376)
   * [INWX](https://www.inwx.com/)
@@ -230,6 +231,11 @@ Alternatively, you may just configure ddclient to operate as a daemon
 and monitor your ppp interface.
 
 ## USING DDCLIENT WITH `cron`
+
+The recommended way to run ddclient is via the provided systemd service, which
+keeps it running as a daemon and handles restarts automatically. If you cannot
+or prefer not to run a persistent daemon (e.g. on systems without systemd, or
+in constrained environments), cron is a good alternative.
 
 If you have not configured ddclient to use daemon-mode, you'll need to
 configure cron to force an update once a month so that the dns entry will

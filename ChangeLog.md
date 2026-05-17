@@ -5,6 +5,24 @@ repository history](https://github.com/ddclient/ddclient/commits/main).
 
 ## v4.0.1-alpha (unreleased work-in-progress)
 
+## 2026-05-16 v4.0.1-rc.1
+
+### Provider updates
+
+  * `hetzner`: Update API endpoint and implementation to align with provider recommendation.
+    [852](https://github.com/ddclient/ddclient/pull/852)
+    [876](https://github.com/ddclient/ddclient/pull/876)
+    Provider notice: https://status.hetzner.com/incident/c2146c42-6dd2-4454-916a-19f07e0e5a44
+
+### Bug fixes
+
+  * `gandi`: Fix %recap tag for ip.
+    [#841](https://github.com/ddclient/ddclient/pull/841)
+  * `digitalocean`: Save IPs to correct variables.
+    [#870](https://github.com/ddclient/ddclient/pull/870)
+  * `porkbun`: Add missing recap for 'ipv4/ipv6' and 'mtime'.
+    [#885](https://github.com/ddclient/ddclient/pull/885)
+
 ## 2025-01-19 v4.0.0
 
 ### Breaking changes
