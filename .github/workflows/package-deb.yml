@@ -71,13 +71,9 @@ jobs:
           cp -r packaging/debian "${SRCDIR}/debian"
 
           # Generate debian/changelog with the correct version
-          cat > "${SRCDIR}/debian/changelog" <<EOF
-ddclient (${DEB_VERSION}) unstable; urgency=low
-
-  * Automated build of upstream version ${UPSTREAM}.
-
- -- ddclient packaging <ddclient@ddclient.net>  $(date -R)
-EOF
+          printf 'ddclient (%s) unstable; urgency=low\n\n  * Automated build of upstream version %s.\n\n -- ddclient packaging <ddclient@ddclient.net>  %s\n' \
+              "${DEB_VERSION}" "${UPSTREAM}" "$(date -R)" \
+              > "${SRCDIR}/debian/changelog"
 
           cd "${SRCDIR}"
           dpkg-buildpackage -b --no-sign
@@ -159,13 +155,10 @@ EOF
           tar xzf "$TARBALL"
           cp -r packaging/debian "${SRCDIR}/debian"
 
-          cat > "${SRCDIR}/debian/changelog" <<EOF
-ddclient (${DEB_VERSION}) unstable; urgency=low
-
-  * Automated build of upstream version ${UPSTREAM}.
-
- -- ddclient packaging <ddclient@ddclient.net>  $(date -R)
-EOF
+          # Generate debian/changelog with the correct version
+          printf 'ddclient (%s) unstable; urgency=low\n\n  * Automated build of upstream version %s.\n\n -- ddclient packaging <ddclient@ddclient.net>  %s\n' \
+              "${DEB_VERSION}" "${UPSTREAM}" "$(date -R)" \
+              > "${SRCDIR}/debian/changelog"
 
           cd "${SRCDIR}"
           dpkg-buildpackage -b --no-sign
