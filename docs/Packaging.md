@@ -208,11 +208,23 @@ The SemVer `-` pre-release separator is replaced with `~` so that Debian
 sees the correct ordering (`4.0.1~rc.1 < 4.0.1`). Post-release `+` suffixes
 are left unchanged as they already sort after the base version.
 
-**2. Distro-targeting suffix (`~CODENAMEn`)**
+**2. Distro-targeting suffix (`+CODENAMEn`)**
 
-Each build appends `~<codename>n` to the Debian revision (e.g. `~bookworm1`,
-`~jammy1`). This follows the standard convention used by Debian backports and
-ensures every distribution produces a unique filename.
+Each build appends `+<codename>n` to the Debian revision (e.g. `+bookworm1`,
+`+jammy1`), giving every distribution a unique filename:
+
+```
+ddclient_4.0.1~rc.1-1+bookworm1_all.deb
+ddclient_4.0.1~rc.1-1+jammy1_all.deb
+```
+
+`+` is used rather than `~` for two reasons:
+
+- **GitHub release assets**: GitHub's API sanitizes `~` to `.` in release
+  asset filenames, mangling the name users download. `+` is preserved as-is.
+- **Semantic correctness**: `+` sorts *after* the base revision in Debian
+  version ordering, which accurately reflects that this is a distro-specific
+  build layered on top of the upstream release, not a pre-release of it.
 
 The trailing integer `n` is a **distro-build counter**. It starts at `1` (not
 `0`) because Debian version ordering treats `1` as the conventional first
@@ -222,18 +234,14 @@ is if a packaging defect is found after a release and the package needs to be
 rebuilt for a specific distro without bumping the upstream version:
 
 ```
-ddclient_4.0.1~rc.1-1~bookworm1_all.deb   ← original build
-ddclient_4.0.1~rc.1-1~bookworm2_all.deb   ← rebuilt to fix a packaging bug
+ddclient_4.0.1~rc.1-1+bookworm1_all.deb   ← original build
+ddclient_4.0.1~rc.1-1+bookworm2_all.deb   ← rebuilt to fix a packaging bug
 ```
 
-Users already running `~bookworm1` will receive `~bookworm2` via `apt upgrade`
+Users already running `+bookworm1` will receive `+bookworm2` via `apt upgrade`
 without any change to the upstream version. Users on other distros are
 unaffected. To trigger a distro rebuild, edit the workflow's `printf` line for
 the relevant job and change the hardcoded `1` to `2`.
-
-The `~codename1` suffix sorts *before* a hypothetical codename-free build, so
-a distro-specific package will never silently "win" over a more general one in
-a mixed-source apt configuration.
 
 The codename is read at build time from `/etc/os-release` inside the container
 (`VERSION_CODENAME`), so no mapping table needs to be maintained in the
@@ -243,11 +251,11 @@ workflow as new distributions are added.
 
 | ddclient version | Debian `Version:` (Bookworm example)    |
 |------------------|-----------------------------------------|
-| `4.0.0`          | `4.0.0-1~bookworm1`                     |
-| `4.0.1-alpha`    | `4.0.1~alpha-1~bookworm1`               |
-| `4.0.1-beta.2`   | `4.0.1~beta.2-1~bookworm1`              |
-| `4.0.1-rc.3`     | `4.0.1~rc.3-1~bookworm1`                |
-| `4.0.1+r.2`      | `4.0.1+r.2-1~bookworm1`                 |
+| `4.0.0`          | `4.0.0-1+bookworm1`                     |
+| `4.0.1-alpha`    | `4.0.1~alpha-1+bookworm1`               |
+| `4.0.1-beta.2`   | `4.0.1~beta.2-1+bookworm1`              |
+| `4.0.1-rc.3`     | `4.0.1~rc.3-1+bookworm1`                |
+| `4.0.1+r.2`      | `4.0.1+r.2-1+bookworm1`                 |
 
 Replace `bookworm` with the target codename (`trixie`, `jammy`, `noble`, etc.)
 for other distributions.
@@ -278,8 +286,8 @@ UPSTREAM="${TARBALL#ddclient-}"; UPSTREAM="${UPSTREAM%.tar.gz}"
 # Get distro codename and translate version
 CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME}")
 case "$UPSTREAM" in
-  *-*) DEB_VERSION="${UPSTREAM%%-*}~${UPSTREAM#*-}-1~${CODENAME}1" ;;
-  *)   DEB_VERSION="${UPSTREAM}-1~${CODENAME}1" ;;
+  *-*) DEB_VERSION="${UPSTREAM%%-*}~${UPSTREAM#*-}-1+${CODENAME}1" ;;
+  *)   DEB_VERSION="${UPSTREAM}-1+${CODENAME}1" ;;
 esac
 
 SRCDIR="ddclient-${UPSTREAM}"
