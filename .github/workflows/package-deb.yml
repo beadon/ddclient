@@ -1,0 +1,191 @@
+name: Package DEB
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-debian:
+    name: Build DEB (Debian ${{ matrix.debian_version }})
+    runs-on: ubuntu-latest
+    container:
+      image: debian:${{ matrix.debian_version }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        debian_version:
+          - "12"
+          - "13"
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              automake \
+              curl \
+              debhelper \
+              dpkg-dev \
+              make \
+              perl \
+              ;
+
+      - name: Build distribution tarball from source
+        run: |
+          ./autogen
+          ./configure
+          make dist
+
+      - name: Build DEBs
+        id: build
+        run: |
+          TARBALL=$(ls ddclient-*.tar.gz)
+          UPSTREAM="${TARBALL#ddclient-}"
+          UPSTREAM="${UPSTREAM%.tar.gz}"
+
+          # Translate semver suffix to Debian version.
+          # '-' suffix (pre-release): replace '-' with '~' (tilde sorts before in Debian)
+          # '+' suffix (post-release): keep '+' as-is (sorts after in Debian)
+          # No suffix is a final release
+          case "$UPSTREAM" in
+            *-*)
+              BASE="${UPSTREAM%%-*}"
+              LABEL="${UPSTREAM#*-}"
+              DEB_VERSION="${BASE}~${LABEL}-1" ;;
+            *)
+              DEB_VERSION="${UPSTREAM}-1" ;;
+          esac
+
+          SRCDIR="ddclient-${UPSTREAM}"
+          tar xzf "$TARBALL"
+          cp -r packaging/debian "${SRCDIR}/debian"
+
+          # Generate debian/changelog with the correct version
+          cat > "${SRCDIR}/debian/changelog" <<EOF
+ddclient (${DEB_VERSION}) unstable; urgency=low
+
+  * Automated build of upstream version ${UPSTREAM}.
+
+ -- ddclient packaging <ddclient@ddclient.net>  $(date -R)
+EOF
+
+          cd "${SRCDIR}"
+          dpkg-buildpackage -b --no-sign
+
+          echo "upstream=${UPSTREAM}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect DEBs
+        run: |
+          mkdir -p artifacts
+          find . -maxdepth 1 -name '*.deb' -exec cp {} artifacts/ \;
+          ls -lh artifacts/
+
+      - name: Upload DEB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddclient-deb-${{ steps.build.outputs.upstream }}-debian${{ matrix.debian_version }}
+          path: artifacts/*.deb
+
+      - name: Attach DEBs to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.deb
+
+  build-ubuntu:
+    name: Build DEB (Ubuntu ${{ matrix.ubuntu_version }})
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:${{ matrix.ubuntu_version }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu_version:
+          - "22.04"
+          - "24.04"
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              automake \
+              curl \
+              debhelper \
+              dpkg-dev \
+              make \
+              perl \
+              ;
+
+      - name: Build distribution tarball from source
+        run: |
+          ./autogen
+          ./configure
+          make dist
+
+      - name: Build DEBs
+        id: build
+        run: |
+          TARBALL=$(ls ddclient-*.tar.gz)
+          UPSTREAM="${TARBALL#ddclient-}"
+          UPSTREAM="${UPSTREAM%.tar.gz}"
+
+          case "$UPSTREAM" in
+            *-*)
+              BASE="${UPSTREAM%%-*}"
+              LABEL="${UPSTREAM#*-}"
+              DEB_VERSION="${BASE}~${LABEL}-1" ;;
+            *)
+              DEB_VERSION="${UPSTREAM}-1" ;;
+          esac
+
+          SRCDIR="ddclient-${UPSTREAM}"
+          tar xzf "$TARBALL"
+          cp -r packaging/debian "${SRCDIR}/debian"
+
+          cat > "${SRCDIR}/debian/changelog" <<EOF
+ddclient (${DEB_VERSION}) unstable; urgency=low
+
+  * Automated build of upstream version ${UPSTREAM}.
+
+ -- ddclient packaging <ddclient@ddclient.net>  $(date -R)
+EOF
+
+          cd "${SRCDIR}"
+          dpkg-buildpackage -b --no-sign
+
+          echo "upstream=${UPSTREAM}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect DEBs
+        run: |
+          mkdir -p artifacts
+          find . -maxdepth 1 -name '*.deb' -exec cp {} artifacts/ \;
+          ls -lh artifacts/
+
+      - name: Upload DEB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddclient-deb-${{ steps.build.outputs.upstream }}-ubuntu${{ matrix.ubuntu_version }}
+          path: artifacts/*.deb
+
+      - name: Attach DEBs to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.deb

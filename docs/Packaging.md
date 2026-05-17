@@ -8,30 +8,33 @@ and how the packaging workflow operates.
 
 ## Automated packaging
 
-A GitHub Actions workflow ([`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml)) builds and
-publishes distribution packages automatically whenever a release is published
-on GitHub. It is also triggerable manually via `workflow_dispatch` for
-testing.
+Two GitHub Actions workflows build and publish distribution packages
+automatically whenever a release is published on GitHub. Both are also
+triggerable manually via `workflow_dispatch` for testing.
 
-On each run the workflow:
+| Workflow | File | Produces |
+|---|---|---|
+| Package RPM | [`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml) | `.rpm` + `.src.rpm` |
+| Package DEB | [`.github/workflows/package-deb.yml`](../.github/workflows/package-deb.yml) | `.deb` |
+
+On each run each workflow:
 
 1. Checks out the source at the release tag.
 2. Builds the distribution tarball using the autotools build system
    (`./autogen && ./configure && make dist`).
-3. Builds a binary RPM and a source RPM (SRPM) in parallel across two jobs:
-   - `build-fedora` — runs inside `fedora:N` containers for each supported Fedora release
-   - `build-epel` — runs inside `almalinux:N` containers with EPEL and CRB/powertools enabled, for each supported EPEL release
-4. Attaches all RPMs to the GitHub release as downloadable assets.
+3. Builds packages in parallel across distribution jobs (see
+   [Supported distributions](#supported-distributions)).
+4. Attaches all packages to the GitHub release as downloadable assets.
 
 ### Manual dispatch
 
-The workflow can also be triggered manually without publishing a release,
+Both workflows can be triggered manually without publishing a release,
 which is useful for testing packaging changes on a branch before cutting a
 release.
 
 **Via the GitHub UI:**
 
-1. Go to **Actions → Package RPM** on GitHub.
+1. Go to **Actions → Package RPM** (or **Package DEB**) on GitHub.
 2. Click **Run workflow**, select the branch to build from, and click
    **Run workflow**.
 
@@ -40,12 +43,14 @@ release.
 ```sh
 # Run against the default branch
 gh workflow run package-rpm.yml --repo ddclient/ddclient
+gh workflow run package-deb.yml --repo ddclient/ddclient
 
 # Run against a specific branch or tag
 gh workflow run package-rpm.yml --repo ddclient/ddclient --ref my-branch
+gh workflow run package-deb.yml --repo ddclient/ddclient --ref my-branch
 ```
 
-When triggered this way the RPMs are built and uploaded as workflow
+When triggered this way packages are built and uploaded as workflow
 artifacts (visible in the Actions run summary) but are **not** attached to
 any release. The version is derived from whatever `make dist` produces on
 the selected branch.
@@ -90,14 +95,14 @@ instead.
 
 ### Verifying the release artifacts
 
-After the workflow completes, the RPM artifacts are attached to the release
+After the workflows complete, all package artifacts are attached to the release
 and visible at:
 
 ```
 https://github.com/ddclient/ddclient/releases/tag/v4.0.1-rc.1
 ```
 
-To download and install a specific RPM to verify it:
+To download and install a specific package to verify it:
 
 ```sh
 # Fedora 44
@@ -109,9 +114,16 @@ ddclient --version
 curl -fsSL -O https://github.com/ddclient/ddclient/releases/download/v4.0.1-rc.1/ddclient-4.0.1-0.1.rc.1.el9.noarch.rpm
 sudo dnf install -y ./ddclient-4.0.1-0.1.rc.1.el9.noarch.rpm
 ddclient --version
+
+# Debian 12 / Ubuntu 24.04
+curl -fsSL -O https://github.com/ddclient/ddclient/releases/download/v4.0.1-rc.1/ddclient_4.0.1~rc.1-1_all.deb
+sudo apt install -y ./ddclient_4.0.1~rc.1-1_all.deb
+ddclient --version
 ```
 
 ## Supported distributions
+
+### RPM-based
 
 | Distribution | Container | Builds produced | EOL |
 |---|---|---|---|
@@ -123,15 +135,32 @@ ddclient --version
 | EPEL 9 (RHEL/AlmaLinux 9) | `almalinux:9` | noarch RPM + SRPM | 2032-05-31 |
 | EPEL 10 (RHEL/AlmaLinux 10) | `almalinux:10` | noarch RPM + SRPM | 2035-05-31 |
 
-The matrices in [`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml) should be updated when Fedora releases
+The matrix in [`.github/workflows/package-rpm.yml`](../.github/workflows/package-rpm.yml) should be updated when Fedora releases
 reach stable or end-of-life. See <https://endoflife.date/fedora> for Fedora
 and <https://endoflife.date/almalinux> for EPEL/RHEL support windows.
+
+### DEB-based
+
+| Distribution | Container | Builds produced | EOL |
+|---|---|---|---|
+| Debian 12 (Bookworm) | `debian:12` | all.deb | 2028-06-10 |
+| Debian 13 (Trixie) | `debian:13` | all.deb | ~2031 |
+| Ubuntu 22.04 LTS (Jammy) | `ubuntu:22.04` | all.deb | 2027-04-01 |
+| Ubuntu 24.04 LTS (Noble) | `ubuntu:24.04` | all.deb | 2029-04-01 |
+
+The matrix in [`.github/workflows/package-deb.yml`](../.github/workflows/package-deb.yml) should be updated when Debian
+or Ubuntu releases reach stable or end-of-life. See <https://endoflife.date/debian>
+for Debian and <https://endoflife.date/ubuntu> for Ubuntu support windows.
 
 ## Version translation
 
 ddclient uses [Semantic Versioning 2.0.0](https://semver.org/) with a
 pre-release suffix separated by `-` and a post-release suffix separated by
-`+`. RPM forbids `-` in the `Version:` field, so the version is split at
+`+`. Both RPM and Debian have their own conventions for encoding this.
+
+### RPM
+
+RPM forbids `-` in the `Version:` field, so the version is split at
 the boundary and the suffix is moved into `Release:`.
 
 | ddclient version | RPM `Version:` | RPM `Release:`         |
@@ -146,12 +175,77 @@ Pre-release versions (leading `0.` in `Release:`) sort before the final
 release. Post-release versions sort after. This follows the
 [Fedora packaging versioning guidelines](https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/).
 
-The workflow does not validate or restrict the suffix — any string after
+### Debian
+
+Debian uses `~` as a pre-release separator (tilde sorts before any character
+in Debian version ordering). The `-` separator from SemVer is therefore
+replaced with `~`. Post-release `+` suffixes are already valid in Debian
+version strings and sort after the base version.
+
+| ddclient version | Debian `Version:`     |
+|------------------|-----------------------|
+| `4.0.0`          | `4.0.0-1`             |
+| `4.0.1-alpha`    | `4.0.1~alpha-1`       |
+| `4.0.1-beta.2`   | `4.0.1~beta.2-1`      |
+| `4.0.1-rc.3`     | `4.0.1~rc.3-1`        |
+| `4.0.1+r.2`      | `4.0.1+r.2-1`         |
+
+The Debian revision (`-1`) is always `1` for packages built directly from an
+upstream release.
+
+Both workflows do not validate or restrict the suffix — any string after
 `-` is treated as a pre-release label and any string after `+` is treated
-as a post-release label, passed through verbatim into `Release:`. The
-examples above reflect the suffixes defined by ddclient's versioning scheme
-(see the comment block in [`ddclient.in`](../ddclient.in) near `$VERSION`), but the packaging
-workflow will handle any future suffix without modification.
+as a post-release label, passed through verbatim. The examples above reflect
+the suffixes defined by ddclient's versioning scheme (see the comment block
+in [`ddclient.in`](../ddclient.in) near `$VERSION`), but the packaging workflows will
+handle any future suffix without modification.
+
+## Building a DEB locally
+
+**On Debian or Ubuntu:**
+
+```sh
+sudo apt-get install -y automake curl debhelper dpkg-dev make perl
+```
+
+Build the distribution tarball and the DEB using [`packaging/debian/`](../packaging/debian/):
+
+```sh
+./autogen
+./configure
+make dist
+
+TARBALL=$(ls ddclient-*.tar.gz)
+UPSTREAM="${TARBALL#ddclient-}"; UPSTREAM="${UPSTREAM%.tar.gz}"
+
+# Translate semver suffix to Debian version
+case "$UPSTREAM" in
+  *-*) DEB_VERSION="${UPSTREAM%%-*}~${UPSTREAM#*-}-1" ;;
+  *)   DEB_VERSION="${UPSTREAM}-1" ;;
+esac
+
+SRCDIR="ddclient-${UPSTREAM}"
+tar xzf "$TARBALL"
+cp -r packaging/debian "${SRCDIR}/debian"
+
+cat > "${SRCDIR}/debian/changelog" <<EOF
+ddclient (${DEB_VERSION}) unstable; urgency=low
+
+  * Local build of upstream version ${UPSTREAM}.
+
+ -- Local Builder <local@localhost>  $(date -R)
+EOF
+
+cd "${SRCDIR}"
+dpkg-buildpackage -b --no-sign
+```
+
+The resulting `.deb` will be in the parent directory (`../ddclient_*.deb`).
+Install it with:
+
+```sh
+sudo apt install ../ddclient_${DEB_VERSION}_all.deb
+```
 
 ## Building an RPM locally
 
@@ -219,11 +313,21 @@ For a new **EPEL** release (RHEL/AlmaLinux/Rocky), add the major version to
 the `epel_version` matrix in the `build-epel` job. No changes to the spec
 file are needed in either case.
 
-### Other package formats (Debian, Arch, etc.)
+### DEB-based (Debian, Ubuntu)
+
+For a new **Debian** release, add the version number to the `debian_version`
+matrix in the `build-debian` job in
+[`.github/workflows/package-deb.yml`](../.github/workflows/package-deb.yml).
+
+For a new **Ubuntu** release, add the version (e.g. `"26.04"`) to the
+`ubuntu_version` matrix in the `build-ubuntu` job. No changes to the
+`packaging/debian/` files are needed in either case.
+
+### Other package formats (Arch, etc.)
 
 Add a new spec or build file under `packaging/<format>/` and a
 corresponding workflow under `.github/workflows/package-<format>.yml`,
-following the same pattern as the RPM workflow:
+following the same pattern as the RPM or DEB workflow:
 
 - Derive the version from the distribution tarball produced by `make dist`.
 - Pass version components to the build tool rather than hardcoding them.
