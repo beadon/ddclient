@@ -175,30 +175,72 @@ Pre-release versions (leading `0.` in `Release:`) sort before the final
 release. Post-release versions sort after. This follows the
 [Fedora packaging versioning guidelines](https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/).
 
+The `%{?dist}` macro in `Release:` is automatically expanded by the RPM
+build system to a distribution tag derived from the build host — for
+example `.fc44` on Fedora 44 or `.el9` on EPEL 9. This means each
+per-distribution build gets a naturally unique filename at no extra effort:
+
+```
+ddclient-4.0.1-0.1.rc.1.fc44.noarch.rpm
+ddclient-4.0.1-0.1.rc.1.el9.noarch.rpm
+```
+
+If `%{?dist}` expands to nothing (e.g. on a plain RHEL host without the
+`redhat-rpm-config` macros), the dist tag is simply omitted from the
+filename, which is harmless for local builds.
+
 ### Debian
 
-Debian uses `~` as a pre-release separator (tilde sorts before any character
-in Debian version ordering). The `-` separator from SemVer is therefore
-replaced with `~`. Post-release `+` suffixes are already valid in Debian
-version strings and sort after the base version.
+#### The tilde (`~`) separator
 
-| ddclient version | Debian `Version:`     |
-|------------------|-----------------------|
-| `4.0.0`          | `4.0.0-1`             |
-| `4.0.1-alpha`    | `4.0.1~alpha-1`       |
-| `4.0.1-beta.2`   | `4.0.1~beta.2-1`      |
-| `4.0.1-rc.3`     | `4.0.1~rc.3-1`        |
-| `4.0.1+r.2`      | `4.0.1+r.2-1`         |
+The `~` (tilde) character has a special meaning in Debian version ordering:
+a tilde sorts *before* anything, including the empty string. The full rule is:
+
+```
+A~B  <  A  <  A+B
+```
+
+ddclient uses this in two ways, both applied in the packaging workflow:
+
+**1. Pre-release SemVer translation**
+
+The SemVer `-` pre-release separator is replaced with `~` so that Debian
+sees the correct ordering (`4.0.1~rc.1 < 4.0.1`). Post-release `+` suffixes
+are left unchanged as they already sort after the base version.
+
+**2. Distro-targeting suffix (`~CODENAMEn`)**
+
+Each build appends `~<codename>1` to the Debian revision (e.g. `~bookworm1`,
+`~jammy1`). This follows the standard convention used by Debian backports and
+ensures every distribution produces a unique filename. The trailing `1` is a
+distro-build counter — increment it to `~bookworm2` only if a rebuilt package
+for the same upstream version is needed.
+
+The `~codename1` suffix sorts *before* a hypothetical codename-free build, so
+a distro-specific package will never silently "win" over a more general one in
+a mixed-source apt configuration.
+
+The codename is read at build time from `/etc/os-release` inside the container
+(`VERSION_CODENAME`), so no mapping table needs to be maintained in the
+workflow as new distributions are added.
+
+#### Version table
+
+| ddclient version | Debian `Version:` (Bookworm example)    |
+|------------------|-----------------------------------------|
+| `4.0.0`          | `4.0.0-1~bookworm1`                     |
+| `4.0.1-alpha`    | `4.0.1~alpha-1~bookworm1`               |
+| `4.0.1-beta.2`   | `4.0.1~beta.2-1~bookworm1`              |
+| `4.0.1-rc.3`     | `4.0.1~rc.3-1~bookworm1`                |
+| `4.0.1+r.2`      | `4.0.1+r.2-1~bookworm1`                 |
+
+Replace `bookworm` with the target codename (`trixie`, `jammy`, `noble`, etc.)
+for other distributions.
 
 The Debian revision (`-1`) is always `1` for packages built directly from an
-upstream release.
-
-Both workflows do not validate or restrict the suffix — any string after
-`-` is treated as a pre-release label and any string after `+` is treated
-as a post-release label, passed through verbatim. The examples above reflect
-the suffixes defined by ddclient's versioning scheme (see the comment block
-in [`ddclient.in`](../ddclient.in) near `$VERSION`), but the packaging workflows will
-handle any future suffix without modification.
+upstream release. The workflows do not validate or restrict the SemVer suffix —
+any string after `-` is treated as a pre-release label and any string after `+`
+is treated as a post-release label, passed through verbatim.
 
 ## Building a DEB locally
 
@@ -218,23 +260,20 @@ make dist
 TARBALL=$(ls ddclient-*.tar.gz)
 UPSTREAM="${TARBALL#ddclient-}"; UPSTREAM="${UPSTREAM%.tar.gz}"
 
-# Translate semver suffix to Debian version
+# Get distro codename and translate version
+CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME}")
 case "$UPSTREAM" in
-  *-*) DEB_VERSION="${UPSTREAM%%-*}~${UPSTREAM#*-}-1" ;;
-  *)   DEB_VERSION="${UPSTREAM}-1" ;;
+  *-*) DEB_VERSION="${UPSTREAM%%-*}~${UPSTREAM#*-}-1~${CODENAME}1" ;;
+  *)   DEB_VERSION="${UPSTREAM}-1~${CODENAME}1" ;;
 esac
 
 SRCDIR="ddclient-${UPSTREAM}"
 tar xzf "$TARBALL"
 cp -r packaging/debian "${SRCDIR}/debian"
 
-cat > "${SRCDIR}/debian/changelog" <<EOF
-ddclient (${DEB_VERSION}) unstable; urgency=low
-
-  * Local build of upstream version ${UPSTREAM}.
-
- -- Local Builder <local@localhost>  $(date -R)
-EOF
+printf 'ddclient (%s) %s; urgency=low\n\n  * Local build of upstream version %s.\n\n -- Local Builder <local@localhost>  %s\n' \
+    "${DEB_VERSION}" "${CODENAME}" "${UPSTREAM}" "$(date -R)" \
+    > "${SRCDIR}/debian/changelog"
 
 cd "${SRCDIR}"
 dpkg-buildpackage -b --no-sign

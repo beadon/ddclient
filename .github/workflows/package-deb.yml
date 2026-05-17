@@ -66,22 +66,27 @@ jobs:
           # '-' suffix (pre-release): replace '-' with '~' (tilde sorts before in Debian)
           # '+' suffix (post-release): keep '+' as-is (sorts after in Debian)
           # No suffix is a final release
+          # Get the distro codename from the container (e.g. bookworm, jammy)
+          CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME}")
+
+          # Translate semver suffix to Debian version and append ~CODENAMEn
+          # so each distro produces a unique filename that sorts correctly.
           case "$UPSTREAM" in
             *-*)
               BASE="${UPSTREAM%%-*}"
               LABEL="${UPSTREAM#*-}"
-              DEB_VERSION="${BASE}~${LABEL}-1" ;;
+              DEB_VERSION="${BASE}~${LABEL}-1~${CODENAME}1" ;;
             *)
-              DEB_VERSION="${UPSTREAM}-1" ;;
+              DEB_VERSION="${UPSTREAM}-1~${CODENAME}1" ;;
           esac
 
           SRCDIR="ddclient-${UPSTREAM}"
           tar xzf "$TARBALL"
           cp -r packaging/debian "${SRCDIR}/debian"
 
-          # Generate debian/changelog with the correct version
-          printf 'ddclient (%s) unstable; urgency=low\n\n  * Automated build of upstream version %s.\n\n -- ddclient packaging <ddclient@ddclient.net>  %s\n' \
-              "${DEB_VERSION}" "${UPSTREAM}" "$(date -R)" \
+          # Generate debian/changelog with the correct version and codename
+          printf 'ddclient (%s) %s; urgency=low\n\n  * Automated build of upstream version %s.\n\n -- ddclient packaging <ddclient@ddclient.net>  %s\n' \
+              "${DEB_VERSION}" "${CODENAME}" "${UPSTREAM}" "$(date -R)" \
               > "${SRCDIR}/debian/changelog"
 
           cd "${SRCDIR}"
@@ -160,22 +165,27 @@ jobs:
           UPSTREAM="${TARBALL#ddclient-}"
           UPSTREAM="${UPSTREAM%.tar.gz}"
 
+          # Get the distro codename from the container (e.g. bookworm, jammy)
+          CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME}")
+
+          # Translate semver suffix to Debian version and append ~CODENAMEn
+          # so each distro produces a unique filename that sorts correctly.
           case "$UPSTREAM" in
             *-*)
               BASE="${UPSTREAM%%-*}"
               LABEL="${UPSTREAM#*-}"
-              DEB_VERSION="${BASE}~${LABEL}-1" ;;
+              DEB_VERSION="${BASE}~${LABEL}-1~${CODENAME}1" ;;
             *)
-              DEB_VERSION="${UPSTREAM}-1" ;;
+              DEB_VERSION="${UPSTREAM}-1~${CODENAME}1" ;;
           esac
 
           SRCDIR="ddclient-${UPSTREAM}"
           tar xzf "$TARBALL"
           cp -r packaging/debian "${SRCDIR}/debian"
 
-          # Generate debian/changelog with the correct version
-          printf 'ddclient (%s) unstable; urgency=low\n\n  * Automated build of upstream version %s.\n\n -- ddclient packaging <ddclient@ddclient.net>  %s\n' \
-              "${DEB_VERSION}" "${UPSTREAM}" "$(date -R)" \
+          # Generate debian/changelog with the correct version and codename
+          printf 'ddclient (%s) %s; urgency=low\n\n  * Automated build of upstream version %s.\n\n -- ddclient packaging <ddclient@ddclient.net>  %s\n' \
+              "${DEB_VERSION}" "${CODENAME}" "${UPSTREAM}" "$(date -R)" \
               > "${SRCDIR}/debian/changelog"
 
           cd "${SRCDIR}"
