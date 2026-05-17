@@ -33,6 +33,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
               automake \
+              build-essential \
               curl \
               debhelper \
               dpkg-dev \
@@ -122,6 +123,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
               automake \
+              build-essential \
               curl \
               debhelper \
               dpkg-dev \
