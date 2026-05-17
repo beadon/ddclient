@@ -210,11 +210,26 @@ are left unchanged as they already sort after the base version.
 
 **2. Distro-targeting suffix (`~CODENAMEn`)**
 
-Each build appends `~<codename>1` to the Debian revision (e.g. `~bookworm1`,
+Each build appends `~<codename>n` to the Debian revision (e.g. `~bookworm1`,
 `~jammy1`). This follows the standard convention used by Debian backports and
-ensures every distribution produces a unique filename. The trailing `1` is a
-distro-build counter — increment it to `~bookworm2` only if a rebuilt package
-for the same upstream version is needed.
+ensures every distribution produces a unique filename.
+
+The trailing integer `n` is a **distro-build counter**. It starts at `1` (not
+`0`) because Debian version ordering treats `1` as the conventional first
+revision — the same reason the package revision itself starts at `-1`. In
+practice `n` will almost always stay at `1`. The only reason to increment it
+is if a packaging defect is found after a release and the package needs to be
+rebuilt for a specific distro without bumping the upstream version:
+
+```
+ddclient_4.0.1~rc.1-1~bookworm1_all.deb   ← original build
+ddclient_4.0.1~rc.1-1~bookworm2_all.deb   ← rebuilt to fix a packaging bug
+```
+
+Users already running `~bookworm1` will receive `~bookworm2` via `apt upgrade`
+without any change to the upstream version. Users on other distros are
+unaffected. To trigger a distro rebuild, edit the workflow's `printf` line for
+the relevant job and change the hardcoded `1` to `2`.
 
 The `~codename1` suffix sorts *before* a hypothetical codename-free build, so
 a distro-specific package will never silently "win" over a more general one in
