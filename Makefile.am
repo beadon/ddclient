@@ -79,6 +79,7 @@ handwritten_tests = \
 	t/parse_assignments.pl \
 	t/protocol_directnic.pl \
 	t/protocol_dnsexit2.pl \
+	t/protocol_dnspod.pl \
 	t/protocol_dyndns2.pl \
 	t/read_recap.pl \
 	t/skip.pl \
