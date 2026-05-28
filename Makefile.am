@@ -91,6 +91,7 @@ handwritten_tests = \
 	t/protocol_ns1.pl \
 	t/protocol_simplycom.pl \
 	t/protocol_spaceship.pl \
+	t/protocol_whm.pl \
 	t/read_recap.pl \
 	t/skip.pl \
 	t/ssl-validate.pl \

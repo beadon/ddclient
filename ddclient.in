@@ -1321,6 +1321,17 @@ our %protocols = (
             'min-interval' => setv(T_DELAY,  0, interval('5m'),          interval('5m')),
         },
     ),
+    'whm' => ddclient::Protocol->new(
+        'update'     => \&nic_whm_update,
+        'examples'   => \&nic_whm_examples,
+        'cfgvars' => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'  => undef,
+            'server' => setv(T_FQDNP,  1, undef, undef),
+            'zone'   => setv(T_FQDN,   1, undef, undef),
+            'ttl'    => setv(T_NUMBER, 0, 300,   undef),
+        },
+    ),
     'yandex' => ddclient::LegacyProtocol->new(
         'update'     => \&nic_yandex_update,
         'examples'   => \&nic_yandex_examples,
@@ -2254,7 +2265,7 @@ sub init_config {
     load_sha1_support(join(', ', @needs_sha1)) if @needs_sha1;
     my @needs_json = grep({ my $p = $_; grep($_ eq $p, @protos); }
                           qw(1984 cloudflare digitalocean directnic dnsexit2 gandi godaddy hetzner
-                             ionos nfsn njalla ns1 porkbun spaceship yandex));
+                             ionos nfsn njalla ns1 porkbun spaceship whm yandex));
     load_json_support(join(', ', @needs_json)) if @needs_json;
 }
 
@@ -8989,6 +9000,198 @@ Example ${program}.conf file entries:
 EoEXAMPLE
 }
 
+
+######################################################################
+## nic_whm_examples
+##
+## written by Bryant Eadon
+##
+######################################################################
+sub nic_whm_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'whm'
+
+The 'whm' protocol updates DNS A/AAAA records via the WHM (Web Host Manager)
+JSON API 1 (https://api.docs.cpanel.net/whm/introduction/).
+
+Configuration variables applicable to the 'whm' protocol are:
+  protocol=whm                 ##
+  server=whm.example.com:2087  ## WHM server hostname and port (required)
+  zone=dns.zone                ## the DNS zone to update (required)
+  login=service-login          ## WHM username (required)
+  password=service-password    ## WHM password (required)
+  ttl=seconds                  ## DNS record TTL in seconds (optional, default 300)
+  fully.qualified.host         ## the host registered with the service.
+
+Note: WHM servers commonly use self-signed TLS certificates.  If certificate
+  validation fails, install a valid certificate or configure ssl_ca_file to
+  point to your server's CA bundle.
+
+Example ${program}.conf file entries:
+  ## Single host update.
+  protocol=whm,                                  \\
+  server=whm.example.com:2087,                   \\
+  zone=example.com,                              \\
+  login=root,                                    \\
+  password=my-whm-password,                      \\
+  host.example.com
+
+  ## Multiple hosts.
+  protocol=whm,                                  \\
+  server=whm.example.com:2087,                   \\
+  zone=example.com,                              \\
+  login=root,                                    \\
+  password=my-whm-password,                      \\
+  host1.example.com,host2.example.com
+EoEXAMPLE
+}
+
+######################################################################
+## nic_whm_update
+######################################################################
+sub nic_whm_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+
+        my $zone = opt('zone', $h);
+
+        my $dump = _whm_call(
+            server   => opt('server', $h),
+            method   => 'GET',
+            path     => '/json-api/dumpzone',
+            query    => "api.version=1&domain=$zone",
+            login    => opt('login', $h),
+            password => opt('password', $h),
+        );
+        if (!defined $dump) {
+            $recap{$h}{"status-ipv$_"} = 'failed' for qw(4 6);
+            next;
+        }
+
+        my $records = $dump->{data}{zone}[0]{record} // [];
+        my ($soa)   = grep { ($_->{type} // '') eq 'SOA' } @$records;
+        my $serial  = $soa ? $soa->{serial} : undef;
+
+        for my $ipv ('4', '6') {
+            my $ip = delete $config{$h}{"wantipv$ipv"} or next;
+            my $rrtype = $ipv eq '4' ? 'A' : 'AAAA';
+            info("setting IPv$ipv address to $ip");
+
+            my $fqname = "$h.";
+            my ($existing) = grep {
+                ($_->{name}  // '') eq $fqname &&
+                ($_->{type}  // '') eq $rrtype
+            } @$records;
+
+            my $ok;
+            if ($existing) {
+                my $line = $existing->{Line};
+                my $data = "api.version=1&domain=$zone&type=$rrtype&address=$ip" .
+                           "&ttl=" . opt('ttl', $h) . "&class=IN&line=$line" .
+                           (defined $serial ? "&serial=$serial" : "");
+                $ok = defined _whm_call(
+                    server   => opt('server', $h),
+                    method   => 'POST',
+                    path     => '/json-api/editzonerecord',
+                    login    => opt('login', $h),
+                    password => opt('password', $h),
+                    body     => $data,
+                );
+            } else {
+                my $data = "api.version=1&domain=$zone&name=$fqname&type=$rrtype" .
+                           "&address=$ip&ttl=" . opt('ttl', $h) . "&class=IN";
+                $ok = defined _whm_call(
+                    server   => opt('server', $h),
+                    method   => 'POST',
+                    path     => '/json-api/addzonerecord',
+                    login    => opt('login', $h),
+                    password => opt('password', $h),
+                    body     => $data,
+                );
+            }
+
+            if ($ok) {
+                $recap{$h}{"ipv$ipv"}        = $ip;
+                $recap{$h}{'mtime'}          = $now;
+                $recap{$h}{"status-ipv$ipv"} = 'good';
+                success("IPv$ipv address set to $ip");
+            } else {
+                $recap{$h}{"status-ipv$ipv"} = 'failed';
+            }
+        }
+    }
+}
+
+######################################################################
+## _whm_call: make an authenticated WHM JSON API 1 call
+######################################################################
+sub _whm_call {
+    my (%args) = @_;
+    my $server   = delete $args{server};
+    my $method   = delete $args{method};
+    my $path     = delete $args{path};
+    my $query    = delete $args{query} // '';
+    my $login    = delete $args{login};
+    my $password = delete $args{password};
+    my $body     = delete $args{body} // '';
+
+    my $url = "$server$path" . ($query ? "?$query" : '');
+    my @headers = ('Accept: application/json');
+    push @headers, 'Content-Type: application/x-www-form-urlencoded' if $body;
+
+    my $reply = geturl(
+        proxy    => opt('proxy'),
+        url      => $url,
+        method   => $method,
+        headers  => \@headers,
+        login    => $login,
+        password => $password,
+        ($body ? (data => $body) : ()),
+    );
+
+    if (!$reply) {
+        failed("could not connect to $server");
+        return undef;
+    }
+
+    my ($status) = ($reply =~ m{^HTTP/\S+\s+(\d+)}i);
+    if (!defined $status) {
+        failed("unexpected HTTP response from $server");
+        return undef;
+    }
+
+    (my $resp_body = $reply) =~ s/^.*?\n\n//s;
+    $resp_body =~ s/^\s+|\s+$//g;
+
+    if ($status !~ /^2/) {
+        my $detail = '';
+        if ($resp_body) {
+            my $parsed = eval { decode_json($resp_body) };
+            $detail = ': ' . $parsed->{metadata}{reason}
+                if ref($parsed) eq 'HASH' && defined $parsed->{metadata}{reason};
+        }
+        failed("API error $status$detail");
+        return undef;
+    }
+
+    return {} if !$resp_body;
+
+    my $parsed = eval { decode_json($resp_body) };
+    if (!defined $parsed) {
+        failed("unexpected API response: $resp_body");
+        return undef;
+    }
+
+    if (ref($parsed) eq 'HASH' && exists $parsed->{metadata}{result}
+            && $parsed->{metadata}{result} != 1) {
+        failed('WHM API error: ' . ($parsed->{metadata}{reason} // 'unknown error'));
+        return undef;
+    }
+
+    return $parsed;
+}
 
 # Execute main() if this file is run as a script or run via PAR (https://metacpan.org/pod/PAR),
 # otherwise do nothing. This "modulino" pattern makes it possible to import this file as a module
