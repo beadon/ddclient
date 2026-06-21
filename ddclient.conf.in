@@ -22,6 +22,7 @@
 #ssl=yes
 
 daemon=300                      # check every 300 seconds
+jitter=60                       # apply up to 60 seconds of delay to the daemon interval
 syslog=yes                      # log update msgs to syslog
 mail=root                       # mail all msgs to root
 mail-failure=root               # mail failed update msgs to root
@@ -176,12 +177,20 @@ pid=@runstatedir@/ddclient.pid  # record PID in file.
 ##
 ## CloudFlare (www.cloudflare.com)
 ##
-# protocol=cloudflare,        \
-# zone=domain.tld,            \
-# ttl=1,                      \
-# login=your-login-email,     \ # Only needed if you are using your global API key. If you are using an API token, set it to "token" (without double quotes).
-# password=APIKey             \ # This is either your global API key, or an API token. If you are using an API token, it must have the permissions "Zone - DNS - Edit" and "Zone - Zone - Read". The Zone resources must be "Include - All zones".
-# domain.tld,my.domain.tld
+## API Token authentication (recommended)
+# protocol=cloudflare,                  \
+# zone=domain.tld,                      \ # Cloudflare DNS zone
+# ttl=300,                              \ # Optional
+# password='your-api-token',            \ # API token with Zone:DNS:Edit and Zone:Zone:Read permissions
+# domain.tld,sub.domain.tld
+#
+## Global API Key authentication (legacy)
+# protocol=cloudflare,                  \
+# zone=domain.tld,                      \ # Cloudflare DNS zone
+# ttl=300,                              \ # Optional
+# login=your-login-email,               \ # Cloudflare DNS zone
+# password=your-global-key              \
+# domain.tld,sub.domain.tld
 
 ##
 ## Gandi (gandi.net)
@@ -212,12 +221,57 @@ pid=@runstatedir@/ddclient.pid  # record PID in file.
 # myhost.example.com
 
 ##
+## Joker.com (https://joker.com)
+##
+## Use DDNS credentials from Joker.com's DNS management interface
+## (not your Joker.com account login).
+##
+## IPv4 only:
+# protocol=dyndns2,                        \
+# usev4=web, webv4=joker-ipv4,             \
+# server=svc.joker.com,                    \
+# login=your-joker-ddns-login,             \
+# password=your-joker-ddns-password        \
+# myhost.example.com
+#
+## Dual-stack IPv4 + IPv6 (two stanzas):
+# protocol=dyndns2,                        \
+# usev4=web, webv4=joker-ipv4,             \
+# usev6=disabled,                          \
+# server=svc.joker.com,                    \
+# login=your-joker-ddns-login,             \
+# password=your-joker-ddns-password        \
+# myhost.example.com
+#
+# protocol=dyndns2,                        \
+# usev4=disabled,                          \
+# usev6=web, webv6=joker-ipv6,             \
+# server=svc.joker.com,                    \
+# login=your-joker-ddns-login,             \
+# password=your-joker-ddns-password        \
+# myhost.example.com
+
+##
 ## Duckdns (http://www.duckdns.org/)
 ##
 #
 # protocol=duckdns, \
 # password=my-auto-generated-password \
-# hostwithoutduckdnsorg
+# hostwithoutduckdnsorg,host2withoutduckdnsorg
+
+##
+## Dynadot (https://www.dynadot.com/)
+## Enable Dynamic DNS for the domain at Dynadot DNS Settings and generate
+## a DDNS password (separate from your account password). The password
+## belongs to the registered domain (zone) and covers its subdomains.
+##
+# protocol=dynadot,                       \
+# server=www.dynadot.com,                 \
+# password=my-dynadot-ddns-password,      \
+# zone=example.com,                       \
+# ttl=300,                                \
+# on-root-domain=no,                      \
+# myhost.example.com
 
 ##
 ## Freemyip (http://freemyip.com/)
@@ -234,6 +288,13 @@ pid=@runstatedir@/ddclient.pid  # record PID in file.
 # protocol=ddns.fm,
 # password=my-token
 # myhost.example.com
+
+##
+## DDNSS.de (https://ddnss.de) - key-based authentication
+##
+# protocol=ddnss,
+# password=your-api-key,
+# myhost.ddnss.de
 
 ##
 ## MyOnlinePortal (http://myonlineportal.net)
@@ -291,6 +352,15 @@ pid=@runstatedir@/ddclient.pid  # record PID in file.
 # protocol=ovh,
 # login=example.com-dynhostuser,
 # password=your_password
+# test.example.com
+
+##
+## Simply.com (https://simply.com)
+##
+# protocol=simply.com,
+# login=<simplyaccount>,    # example: S123456
+# password=<apikey>,
+# zone=example.com,
 # test.example.com
 
 ##
@@ -421,9 +491,190 @@ pid=@runstatedir@/ddclient.pid  # record PID in file.
 # myhost.example.org
 
 ##
+## IONOS (https://ionos.com)
+##
+# protocol=ionos,               \
+# password=prefix.secret,       \
+# myhost.example.com
+
+##
 ## Hetzner
 ##
 # protocol=hetzner                          \
 # zone=dns.zone                             \
 # password=hetzner-cloud-api-key            \
 # myhost.example.org
+
+##
+## NS1 / IBM NS1 Connect (https://ns1.com/)
+##
+# protocol=ns1                                                 \
+# login=myapikey                                               \
+# zone=example.com                                             \
+# myhost.example.com
+
+##
+## Netcup (https://www.netcup.de)
+##
+# protocol=netcup                                              \
+# login=12345                                                  \
+# password='my-api-password'                                   \
+# apikey=my-api-key                                            \
+# zone=example.com                                             \
+# myhost.example.com
+
+##
+## DynV6 (https://dynv6.com) - free IPv6-focused dynamic DNS
+## Authenticate with your zone's HTTP token; no username required.
+##
+# protocol=dyndns2,                         \
+# server=dynv6.com,                         \
+# login=none,                               \
+# password=your-dynv6-http-token            \
+# yourhostname.dynv6.net
+
+##
+## Sitelutions (https://sitelutions.com)
+##
+# protocol=sitelutions,    \
+# login=me@example.com,    \
+# password=my-password     \
+# 12345678
+
+##
+## Dynu (https://www.dynu.com/)
+##
+# protocol=dynu                                                \
+# login=myusername                                             \
+# password=mypassword                                          \
+# myhome.dynu.net
+
+##
+## Spaceship (https://www.spaceship.com/)
+##
+# protocol=spaceship,                       \
+# server=spaceship.dev,                     \
+# login=myapikey,                           \
+# password='myapisecret',                   \
+# zone=example.com,                         \
+# myhost.example.com
+
+##
+## All-inkl.com (https://all-inkl.com)
+## Create DDNS credentials in KAS under Tools → DDNS Settings.
+## Supports IPv4 and IPv6 (enable Dual-Stack in KAS for IPv6).
+##
+# protocol=dyndns2,                         \
+# server=dyndns.kasserver.com,               \
+# login=your-kas-ddns-login,                \
+# password=your-kas-ddns-password           \
+# yourhost.yourdomain.com
+
+##
+## NIC.RU (https://www.nic.ru) - Russian .ru domain registry
+## Use your NIC.RU account login and password from the DNS hosting panel.
+##
+# protocol=dyndns2,                         \
+# server=api.nic.ru,                        \
+# login=your-nicru-login,                   \
+# password=your-nicru-password              \
+# yourhostname.example.ru
+
+##
+## UpdatedIP (updatedip.com)
+##
+# protocol=dyndns2
+# server=updatedip.com
+# login=my-updatedip-login
+# password=my-updatedip-password
+# subdomain.updatedip.com
+
+##
+## LuaDNS (https://luadns.com) - programmable DNS with DDNS support
+## Use your account email as login and your API key as password.
+##
+# protocol=dyndns2,                         \
+# server=app.luadns.com,                    \
+# login=your-luadns-email,                  \
+# password=your-luadns-api-key              \
+# yourhostname.example.com
+
+##
+## WebSupport (https://www.websupport.sk)
+## Generate a DynDNS API key in Admin > Security and Login > API Authentication.
+## Use the generated identifier as login and the secret as password.
+##
+# protocol=dyndns2,                         \
+# server=dyndns.websupport.sk,              \
+# login=your-websupport-api-identifier,     \
+# password=your-websupport-api-secret       \
+# yourhostname.yourdomain.sk
+
+##
+## PowerDNS via PowerDNS-Admin (https://github.com/PowerDNS-Admin/PowerDNS-Admin)
+## Self-hosted PowerDNS with dyndns2-compatible /nic/update endpoint.
+## Replace 'your.powerdns-admin.example.com' with your PowerDNS-Admin hostname.
+##
+# protocol=dyndns2,                         \
+# server=your.powerdns-admin.example.com,   \
+# login=your-powerdns-admin-username,       \
+# password=your-powerdns-admin-password     \
+# yourhostname.example.com
+
+##
+## RFC 2136 DNS UPDATE (protocol=nsupdate) - self-hosted DNS servers
+## Generate a TSIG key with: ddns-confgen -q -k keyname
+## See nsupdate(1) and ddns-confgen(8) for details.
+##
+## PowerDNS Authoritative Server (https://doc.powerdns.com/authoritative/dnsupdate.html)
+##
+# protocol=nsupdate,                        \
+# server=ns1.example.com,                   \
+# password=/etc/ddclient/dyn.example.com.key, \
+# zone=dyn.example.com,                    \
+# ttl=3600                                 \
+# yourhostname.dyn.example.com
+
+##
+## ISC BIND (https://www.isc.org/bind/)
+## Configure allow-update or update-policy in named.conf for the zone.
+##
+# protocol=nsupdate,                        \
+# server=ns1.example.com,                   \
+# password=/etc/ddclient/dyn.example.com.key, \
+# zone=dyn.example.com,                    \
+# ttl=3600                                 \
+# yourhostname.dyn.example.com
+
+##
+## Knot DNS (https://www.knot-dns.cz/)
+## Configure update-in and a TSIG key in knot.conf.
+##
+# protocol=nsupdate,                        \
+# server=ns1.example.com,                   \
+# password=/etc/ddclient/dyn.example.com.key, \
+# zone=dyn.example.com,                    \
+# ttl=3600                                 \
+# yourhostname.dyn.example.com
+
+##
+## Technitium DNS Server (https://technitium.com/dns/)
+## Configure a Dynamic Updates RFC 2136 security policy in the Technitium web UI.
+##
+# protocol=nsupdate,                        \
+# server=your.technitium.host,              \
+# password=/etc/ddclient/dyn.example.com.key, \
+# zone=dyn.example.com,                    \
+# ttl=3600                                 \
+# yourhostname.dyn.example.com
+
+##
+## DynV6 (https://dynv6.com) via RFC 2136
+## Obtain your TSIG key from DynV6 zone settings.
+##
+# protocol=nsupdate,                        \
+# server=ns1.dynv6.com,                     \
+# password=/etc/ddclient/dynv6.key,         \
+# zone=your-zone.dynv6.net,                \
+# ttl=600                                  \
+# myhost.your-zone.dynv6.net

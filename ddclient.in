@@ -1,9 +1,24 @@
 #!/usr/bin/perl
 ######################################################################
+# ddclient - update client for dynamic DNS services
 #
-# DDCLIENT - a Perl client for updating DynDNS information
+# Copyright (C) 1999-2026 the ddclient contributors
+# Copyright (C) 2006-2014 Wim Vinckier <wimpunk+github@gmail.com>
+# Copyright (C) 1999-2001 Paul Burry <paul+ddclient@burry.ca>
 #
-# Original Author: Paul Burry (paul+ddclient@burry.ca)
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU General Public License as published by the Free Software Foundation, either version 2 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along with this program.  If
+# not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
 # Current maintainers:
 #   Reuben Thomas <rrt@sc3d.org>
 #   Lenard Heß <lenard@rrhess.de>
@@ -78,7 +93,7 @@ use Sys::Hostname;
 #
 # For consistency and to match user expectations, the release part of the version is always three
 # components: MAJOR.MINOR.PATCH.
-use version 0.77; our $VERSION = version->declare('v4.0.1.0_901');
+use version 0.77; our $VERSION = version->declare('v4.0.1.0_902');
 
 sub parse_version {
     my ($v) = @_;
@@ -185,6 +200,7 @@ my $result;
 my $saved_recap;
 my %saved_opt;
 my $daemon;
+my $jitter;
 # Control how many times warning message logged for invalid IP addresses
 my (%warned_ipv4, %warned_ipv6);
 
@@ -274,6 +290,7 @@ our %recapvars = (
 ## strategies for obtaining an ip address.
 our %builtinweb = (
     'dyndns' => {'url' => 'http://checkip.dyndns.org/', 'skip' => 'Current IP Address:'},
+    'dynu' => {'url' => 'https://checkip.dynu.com/'},
     'freedns' => {'url' => 'https://freedns.afraid.org/dynamic/check.php'},
     'he' => {
         url => 'https://checkip.dns.he.net/',
@@ -288,8 +305,13 @@ our %builtinweb = (
     'myonlineportal' => {'url' => 'https://myonlineportal.net/checkip'},
     'noip-ipv4' => {'url' => 'http://ip1.dynupdate.no-ip.com/'},
     'noip-ipv6' => {'url' => 'http://ip1.dynupdate6.no-ip.com/'},
+    'desec-ipv4' => {'url' => 'https://checkipv4.dedyn.io/'},
+    'desec-ipv6' => {'url' => 'https://checkipv6.dedyn.io/'},
+    'joker-ipv4' => {'url' => 'https://ipv4.svc.joker.com/nic/checkip'},
+    'joker-ipv6' => {'url' => 'https://ipv6.svc.joker.com/nic/checkip'},
     'nsupdate.info-ipv4' => {'url' => 'https://ipv4.nsupdate.info/myip'},
     'nsupdate.info-ipv6' => {'url' => 'https://ipv6.nsupdate.info/myip'},
+    'updatedip' => {'url' => 'https://checkip.updatedip.com'},
     'zoneedit' => {'url' => 'https://dynamic.zoneedit.com/checkip.html'},
 );
 
@@ -689,6 +711,9 @@ sub setv {
 our %cfgvars = (
     'global-defaults' => {
         'daemon'              => setv(T_DELAY, 0, $daemon_default,      interval('60s')),
+        'jitter'              => setv(T_DELAY, 0, sub {
+            opt('daemon') ? int(opt('daemon') * 0.2) : undef
+        }, undef),
         'foreground'          => setv(T_BOOL,  0, 0,                    undef),
         'file'                => setv(T_FILE,  0, "$etc/$program.conf", undef),
         'cache'               => setv(T_FILE,  0, "$cachedir/$program.cache", undef),
@@ -947,6 +972,15 @@ our %protocols = (
             'server' => setv(T_FQDNP, 0, 'https://api.ddns.fm', undef),
         },
     ),
+    'ddnss' => ddclient::Protocol->new(
+        'update'   => \&nic_ddnss_update,
+        'examples' => \&nic_ddnss_examples,
+        'cfgvars' => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'  => undef,
+            'server' => setv(T_FQDNP, 0, 'ddnss.de', undef),
+        },
+    ),
     'digitalocean' => ddclient::Protocol->new(
         'update' => \&nic_digitalocean_update,
         'examples' => \&nic_digitalocean_examples,
@@ -1020,6 +1054,18 @@ our %protocols = (
             'server' => setv(T_FQDNP, 0, 'www.duckdns.org', undef),
         },
     ),
+    'dynadot' => ddclient::Protocol->new(
+        'update'     => \&nic_dynadot_update,
+        'examples'   => \&nic_dynadot_examples,
+        'cfgvars' => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'          => undef,
+            'server'         => setv(T_FQDNP,  0, 'www.dynadot.com', undef),
+            'ttl'            => setv(T_NUMBER, 0, 300,               undef),
+            'zone'           => setv(T_FQDN,   0, undef,             undef),
+            'on-root-domain' => setv(T_BOOL,   0, 0,                 undef),
+        },
+    ),
     'dyndns1' => ddclient::LegacyProtocol->new(
         'update'     => \&nic_dyndns1_update,
         'examples'   => \&nic_dyndns1_examples,
@@ -1048,6 +1094,15 @@ our %protocols = (
             %{$recapvars{'dyndns-common'}},
         },
         'force_update_if_changed' => [qw(wildcard mx backupmx)],
+    ),
+    'dynu' => ddclient::Protocol->new(
+        'update'   => \&nic_dynu_update,
+        'examples' => \&nic_dynu_examples,
+        'cfgvars'  => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'server' => setv(T_FQDNP, 0, 'api.dynu.com', undef),
+            'zone'   => setv(T_STRING, 0, undef,          undef),
+        },
     ),
     'easydns' => ddclient::Protocol->new(
         'update'     => \&nic_easydns_update,
@@ -1161,6 +1216,20 @@ our %protocols = (
             'server'       => setv(T_FQDNP, 0, 'dynamicdns.park-your-domain.com', undef),
         },
     ),
+    'netcup' => ddclient::Protocol->new(
+        'update'   => \&nic_netcup_update,
+        'examples' => \&nic_netcup_examples,
+        'cfgvars'  => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'    => undef,   ## customer number
+            'password' => undef,   ## API password
+            'apikey'   => undef,   ## API key
+            'zone'     => undef,
+            'ttl'      => setv(T_NUMBER, 0, 3600,            undef),
+            'ssl'      => setv(T_BOOL,  0, 1,               undef),
+            'server'   => setv(T_FQDNP, 0, 'ccp.netcup.net', undef),
+        },
+    ),
     'nfsn' => ddclient::LegacyProtocol->new(
         'update'     => \&nic_nfsn_update,
         'examples'   => \&nic_nfsn_examples,
@@ -1188,6 +1257,17 @@ our %protocols = (
         'cfgvars' => {
             %{$cfgvars{'protocol-common-defaults'}},
             'server' => setv(T_FQDNP, 0, 'dynupdate.no-ip.com', undef),
+        },
+    ),
+    'ns1' => ddclient::Protocol->new(
+        'update'   => \&nic_ns1_update,
+        'examples' => \&nic_ns1_examples,
+        'cfgvars'  => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'  => undef,
+            'zone'   => setv(T_FQDN,   0, undef,              undef),
+            'ttl'    => setv(T_NUMBER, 0, 300,                undef),
+            'server' => setv(T_FQDNP,  0, 'api.nsone.net/v1', undef),
         },
     ),
     'nsupdate' => ddclient::Protocol->new(
@@ -1224,13 +1304,35 @@ our %protocols = (
             'server'         => setv(T_FQDNP,  0, 'api.porkbun.com', undef),
         },
     ),
+    'simply.com' => ddclient::Protocol->new(
+        'update'     => \&nic_simplycom_update,
+        'examples'   => \&nic_simplycom_examples,
+        'cfgvars' => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'server' => setv(T_FQDNP, 0, 'dyndns.simply.com', undef),
+            'zone'   => setv(T_FQDN,  0, undef,                       undef),
+        },
+    ),
+    'spaceship' => ddclient::Protocol->new(
+        'update'   => \&nic_spaceship_update,
+        'examples' => \&nic_spaceship_examples,
+        'cfgvars'  => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'    => undef,
+            'password' => undef,
+            'zone'     => setv(T_FQDN,   0, undef,          undef),
+            'ttl'      => setv(T_NUMBER, 0, 300,            undef),
+            'server'   => setv(T_FQDNP,  0, 'spaceship.dev', undef),
+        },
+    ),
     'sitelutions' => ddclient::LegacyProtocol->new(
         'update'     => \&nic_sitelutions_update,
         'examples'   => \&nic_sitelutions_examples,
         'cfgvars' => {
             %{$cfgvars{'protocol-common-defaults'}},
-            'server'       => setv(T_FQDNP, 0, 'www.sitelutions.com', undef),
-            'min-interval' => setv(T_DELAY, 0, interval('5m'), interval('5m')),
+            'server'       => setv(T_FQDNP,  0, 'api2.sitelutions.com', undef),
+            'ttl'          => setv(T_NUMBER, 0, undef,                   undef),
+            'min-interval' => setv(T_DELAY,  0, interval('5m'),          interval('5m')),
         },
     ),
     'yandex' => ddclient::LegacyProtocol->new(
@@ -1311,6 +1413,16 @@ our %protocols = (
             'max-interval' => setv(T_DELAY, 0, 'inf', 0),
         },
     ),
+    'ionos' => ddclient::Protocol->new(
+        'update'   => \&nic_ionos_update,
+        'examples' => \&nic_ionos_examples,
+        'cfgvars'  => {
+            %{$cfgvars{'protocol-common-defaults'}},
+            'login'  => undef,
+            'server' => setv(T_FQDNP,  0, 'api.hosting.ionos.com', undef),
+            'ttl'    => setv(T_NUMBER, 0, 300,                      300),
+        },
+    ),
 );
 $cfgvars{'merged'} = {
     map({ %{$protocols{$_}{'cfgvars'}} } keys(%protocols)),
@@ -1356,6 +1468,7 @@ my @opt = (
     "usage: ${program} [options]",
     "options are:",
     ["daemon",            "=s", "--daemon=<delay>       : run as a daemon, specify <delay> as an interval"],
+    ["jitter",            "=s", "--jitter=<jitter>      : add random jitter up to <jitter> to the daemon interval, specify <jitter> as an interval"],
     ["foreground",        "!",  "--foreground           : do not fork"],
     ["proxy",             "=s", "--proxy=<host>         : use <host> as the HTTP proxy"],
     ["server",            "=s", "--server=<host>        : update DNS information on <host>"],
@@ -1489,6 +1602,7 @@ sub main {
         %opt    = %saved_opt;
         read_config(opt('file'), \%config, \%globals);
         init_config();
+        warn_if_no_hosts();
         read_recap(opt('cache'));
         print_info() if opt('debug') && opt('verbose');
         $daemon = opt('daemon');
@@ -1496,6 +1610,15 @@ sub main {
         update_nics();
 
         if ($daemon) {
+            # Jitter spreads the API calls across clients and reduces overloading
+            # the upstream DNS provider when many clients are running with the same
+            # daemon interval.
+            # For example, for a jitter of 60 seconds and a daemon interval of 5
+            # minutes, a jitter of [0, 60s) would be applied to the daemon interval
+            # and the next update would occur in [300s, 360s).
+            $daemon += int(rand($jitter))
+                if ($jitter = opt('jitter')) && ($jitter // 0) != 'inf';
+
             debug("sleep %s", $daemon);
             sendmail();
 
@@ -1514,7 +1637,6 @@ sub main {
             $result     = 0;
 
         } elsif (!scalar(%config)) {
-            warning("no hosts to update.") if !opt('quiet');
             $result = 1;
 
         } else {
@@ -1818,6 +1940,29 @@ sub parse_assignment {
     warning("assignment to '%s' ended with an unterminated quote (%s)", $name, $quote) if $quote;
     return ($name, $value, $rest);
 }
+######################################################################
+## warn_if_no_hosts()
+## Warns when no hosts are configured, with a hint about the old 3.x
+## config path if a file is found there.
+######################################################################
+sub warn_if_no_hosts {
+    return if %config;
+    warning("no hosts configured in %s", opt('file'));
+    # The 3.x migration hint is opt-in at build time: pass
+    # --enable-migration-hints to ./configure when building from
+    # source for a manual installation.
+    return unless '@ENABLE_MIGRATION_HINTS@' eq 'yes';
+    # If confdir has a parent (e.g. /etc/ddclient -> /etc), check whether
+    # the old 3.x config file exists one level up.
+    (my $sysconfdir = $etc) =~ s{/[^/]+$}{};
+    my $old_conf = "$sysconfdir/$program.conf";
+    if ($old_conf ne opt('file') && -f $old_conf) {
+        warning("found a config file at the old 3.x location: %s", $old_conf);
+        warning("move it to %s, or re-run ./configure with", opt('file'));
+        warning("  --with-confdir='\${sysconfdir}'  to retain the old location");
+    }
+}
+
 ######################################################################
 ## read_config
 ######################################################################
@@ -2123,7 +2268,7 @@ sub init_config {
     load_sha1_support(join(', ', @needs_sha1)) if @needs_sha1;
     my @needs_json = grep({ my $p = $_; grep($_ eq $p, @protos); }
                           qw(1984 cloudflare digitalocean directnic dnsexit2 gandi godaddy hetzner
-                             nfsn njalla porkbun yandex));
+                             ionos netcup nfsn njalla ns1 porkbun spaceship yandex));
     load_json_support(join(', ', @needs_json)) if @needs_json;
 }
 
@@ -2175,6 +2320,11 @@ sub process_args {
 sub test_possible_ip {
     local $opt{'debug'} = 0;
 
+    printf "NOTE: --query surveys ALL available IP detection methods regardless\n";
+    printf "of your configuration.  Only your configured use=/usev4=/usev6=\n";
+    printf "settings are used during normal operation.  Warnings about\n";
+    printf "unreachable services below are expected on single-stack hosts.\n";
+    printf "\n";
     printf "----- Test_possible_ip with 'get_ip' -----\n";
     if (defined(opt('ip'))) {
         local $opt{'use'} = 'ip';
@@ -2309,6 +2459,12 @@ sub test_possible_ip {
         printf("usev6=cmdv6, cmdv6=%s address is %s\n",
                opt('cmdv6'), get_ipv6(strategy_inputs('usev6')) // 'NOT FOUND');
     }
+
+    my @configured;
+    push @configured, 'use=' . opt('use') if defined(opt('use'));
+    push @configured, 'usev4=' . (opt('usev4') // '(unset)');
+    push @configured, 'usev6=' . (opt('usev6') // '(unset)');
+    printf "\nConfigured IP detection: %s\n", join(' ', @configured);
 
     exit 0 unless opt('debug');
 }
@@ -2874,7 +3030,7 @@ sub geturl {
     if (!opt('exec')) {
         info("would request: ${protocol}://${server}/${url}");
     } else {
-        push(@curlopt, "silent");
+        push(@curlopt, "no-progress-meter");
         push(@curlopt, "include"); ## Include HTTP response for compatibility
         push(@curlopt, "insecure") if ($use_ssl && !($params{ssl_validate} // 1));
         push(@curlopt, "cacert=\"".escape_curl_param(opt('ssl_ca_file')).'"') if defined(opt('ssl_ca_file'));
@@ -3920,6 +4076,116 @@ Example ${program}.conf file entries:
   login=my-dyndns.org-login,                                \\
   password=my-dyndns.org-password                           \\
   my-toplevel-domain.com,my-other-domain.com
+
+  ## All-inkl.com (https://all-inkl.com) - hosted DNS with DDNS support
+  ## Create DDNS credentials in KAS under Tools → DDNS Settings.
+  ## Supports both IPv4 and IPv6 (enable Dual-Stack in KAS for IPv6).
+  protocol=dyndns2,                                         \\
+  server=dyndns.kasserver.com,                              \\
+  login=your-kas-ddns-login,                                \\
+  password=your-kas-ddns-password                           \\
+  yourhost.yourdomain.com
+
+  ## deSEC (https://desec.io) - free, open-source, DNSSEC-enabled dynamic DNS
+  ## The dynDNS update password is displayed after sign-up when a .dedyn.io
+  ## domain is created. Alternatively, create an API token at
+  ## https://desec.io/tokens. There is no login; users are identified by the
+  ## update password (API token) alone.
+  ## Use 'webv4=desec-ipv4' and/or 'webv6=desec-ipv6' to detect your IP via
+  ## deSEC's own check services.
+  ##
+  ## NOTE: deSEC intentionally treats an empty 'myip' parameter as a request
+  ## to delete the A or AAAA record. The original DynDNS2 spec leaves this
+  ## behavior undefined (https://help.dyn.com/perform-update.html), but deSEC
+  ## uses it as a deliberate deletion signal. ddclient will skip the update
+  ## entirely if IP detection fails, so this should not be triggered under
+  ## normal operation.
+  protocol=dyndns2,                                         \\
+  server=update.dedyn.io,                                   \\
+  password=your-desec-update-password                       \\
+  yourdomain.dedyn.io
+
+  ## DDNSS.de (https://ddnss.de) - free dynamic DNS
+  ## Uses HTTP Basic Auth with the standard dyndns2 /nic/update endpoint.
+  ## For dual-stack, repeat the stanza twice: once with usev4=webv4,usev6=disabled
+  ## and once with usev4=disabled,usev6=webv6.
+  protocol=dyndns2,                                         \\
+  server=ddnss.de,                                          \\
+  login=your-ddnss-username,                                \\
+  password=your-ddnss-password                              \\
+  myhost.ddnss.de
+
+  ## DynV6 (https://dynv6.com) - free IPv6-focused dynamic DNS
+  ## Authenticate with your zone's HTTP token; no username required (login=none).
+  protocol=dyndns2,                                         \\
+  server=dynv6.com,                                         \\
+  login=none,                                               \\
+  password=your-dynv6-http-token                            \\
+  yourhostname.dynv6.net
+
+  ## Joker.com (https://joker.com) - domain registrar with dynamic DNS support
+  ## Uses dyndns2-compatible /nic/update endpoint with HTTP Basic Auth.
+  ## The login and password are the DDNS credentials from Joker.com's DNS
+  ## management interface, not your Joker.com account credentials.
+  ## Use 'webv4=joker-ipv4' and 'webv6=joker-ipv6' to detect your IP via
+  ## Joker's dedicated IPv4/IPv6 checkip services.
+  ##
+  ## IPv4 only:
+  protocol=dyndns2,                                         \\
+  usev4=web, webv4=joker-ipv4,                              \\
+  server=svc.joker.com,                                     \\
+  login=your-joker-ddns-login,                              \\
+  password=your-joker-ddns-password                         \\
+  myhost.example.com
+  ##
+  ## Dual-stack IPv4 + IPv6 (two stanzas):
+  protocol=dyndns2,                                         \\
+  usev4=web, webv4=joker-ipv4, usev6=disabled,              \\
+  server=svc.joker.com,                                     \\
+  login=your-joker-ddns-login,                              \\
+  password=your-joker-ddns-password                         \\
+  myhost.example.com
+  ##
+  protocol=dyndns2,                                         \\
+  usev4=disabled, usev6=web, webv6=joker-ipv6,              \\
+  server=svc.joker.com,                                     \\
+  login=your-joker-ddns-login,                              \\
+  password=your-joker-ddns-password                         \\
+  myhost.example.com
+
+  ## LuaDNS (https://luadns.com) - programmable DNS with DDNS support
+  ## Use your account email as login and your API key as password.
+  protocol=dyndns2,                                         \\
+  server=app.luadns.com,                                    \\
+  login=your-luadns-email,                                  \\
+  password=your-luadns-api-key                              \\
+  yourhostname.example.com
+
+  ## NIC.RU (https://www.nic.ru) - Russian .ru domain registry with DDNS support
+  ## Use your NIC.RU account login and password from the DNS hosting panel.
+  protocol=dyndns2,                                         \\
+  server=api.nic.ru,                                        \\
+  login=your-nicru-login,                                   \\
+  password=your-nicru-password                              \\
+  yourhostname.example.ru
+
+  ## WebSupport (https://www.websupport.sk) - Slovak domain registrar with DDNS support
+  ## Generate a DynDNS API key in Admin > Security and Login > API Authentication.
+  ## Use the generated identifier as login and the secret as password.
+  protocol=dyndns2,                                         \\
+  server=dyndns.websupport.sk,                              \\
+  login=your-websupport-api-identifier,                     \\
+  password=your-websupport-api-secret                       \\
+  yourhostname.yourdomain.sk
+
+  ## PowerDNS via PowerDNS-Admin (https://github.com/PowerDNS-Admin/PowerDNS-Admin)
+  ## Self-hosted PowerDNS with dyndns2-compatible /nic/update endpoint.
+  ## Replace 'your.powerdns-admin.example.com' with your PowerDNS-Admin hostname.
+  protocol=dyndns2,                                         \\
+  server=your.powerdns-admin.example.com,                   \\
+  login=your-powerdns-admin-username,                       \\
+  password=your-powerdns-admin-password                     \\
+  yourhostname.example.com
 EoEXAMPLE
 }
 
@@ -4049,6 +4315,144 @@ sub nic_dyndns2_update {
         warning("unexpected extra lines after per-host update status lines:\n" .
                 join("\n", @reply[@hosts..$#reply]))
             if (@reply > @hosts);
+    }
+}
+
+######################################################################
+## nic_dynu_examples
+######################################################################
+sub nic_dynu_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'dynu'
+
+The 'dynu' protocol is used by the dynamic DNS service offered by
+Dynu Systems, Inc. (www.dynu.com).
+API documentation: https://www.dynu.com/DynamicDNS/IP-Update-Protocol
+
+The password must be the plain text, MD5, or SHA-256 hash of your
+Dynu account password.
+
+Configuration variables applicable to the 'dynu' protocol are:
+  protocol=dynu             ##
+  server=api.dynu.com       ## defaults to api.dynu.com
+  login=your-login          ## Dynu account username
+  password=your-password    ## Dynu account password (or MD5/SHA-256 hash)
+  zone=your-root-domain     ## root domain registered with Dynu; required
+                            ## when updating a subdomain (e.g. zone=example.com
+                            ## to update host.example.com)
+  fully.qualified.host      ## the hostname to update
+
+Example ${program}.conf file entries:
+  ## Dynu free hostname (e.g. myhome.dynu.net) — IPv4 only
+  protocol=dynu                    \\
+  login=myusername                 \\
+  password=mypassword              \\
+  myhome.dynu.net
+
+  ## Dynu free hostname — dual-stack IPv4 and IPv6
+  usev4=webv4
+  usev6=ifv6, ifv6=eth0
+
+  protocol=dynu                    \\
+  login=myusername                 \\
+  password=mypassword              \\
+  myhome.dynu.net
+
+  ## Custom domain — update a subdomain (zone required)
+  usev4=webv4
+  usev6=ifv6, ifv6=eth0
+
+  protocol=dynu                    \\
+  login=myusername                 \\
+  password=mypassword              \\
+  zone=example.com                 \\
+  host.example.com
+EoEXAMPLE
+}
+
+######################################################################
+## nic_dynu_update
+##
+## based on https://www.dynu.com/DynamicDNS/IP-Update-Protocol
+######################################################################
+sub nic_dynu_update {
+    my $self = shift;
+    my %errors = (
+        'badauth'     => 'Bad authorization (username or password)',
+        'notfqdn'     => 'A Fully-Qualified Domain Name was not provided',
+        'nohost'      => 'The hostname specified does not exist',
+        '!donator'    => 'Feature restricted to members',
+        'numhost'     => 'Too many hostnames specified',
+        'abuse'       => 'Update blocked due to abusive behaviour',
+        'servererror' => 'Server error; retry later',
+        'dnserr'      => 'DNS error encountered; retry later',
+        '911'         => 'Server maintenance; retry in 10 minutes',
+        'nochg'       => 'IP address is current; no update required',
+    );
+    for my $group (group_hosts_by(\@_, qw(login password server zone wantipv4 wantipv6))) {
+        my @hosts = @{$group->{hosts}};
+        my %gcfg  = %{$group->{cfg}};
+        my $ipv4  = $gcfg{'wantipv4'};
+        my $ipv6  = $gcfg{'wantipv6'};
+        delete $config{$_}{'wantipv4'} for @hosts;
+        delete $config{$_}{'wantipv6'} for @hosts;
+        for my $h (@hosts) {
+            local $_l = pushlogctx($h);
+            info("setting IPv4 address to $ipv4") if $ipv4;
+            info("setting IPv6 address to $ipv6") if $ipv6;
+            # Derive hostname and alias from zone.
+            # Dynu requires hostname=zone&alias=subdomain for custom domains
+            # (e.g. zone=example.com, alias=host for host.example.com).
+            # Without zone, the full FQDN is used as hostname, which works
+            # for free Dynu subdomains (e.g. myhome.dynu.net).
+            my $zone = $gcfg{'zone'};
+            my ($hostname, $alias);
+            if (defined $zone) {
+                my $stripped = $h;
+                unless ($stripped =~ s/(?:^|\.)\Q$zone\E$//) {
+                    failed("hostname does not end with the zone: $zone");
+                    next;
+                }
+                $hostname = $zone;
+                $alias    = $stripped;
+            } else {
+                $hostname = $h;
+                $alias    = undef;
+            }
+            my $url = "$gcfg{'server'}/nic/update?hostname=$hostname";
+            $url .= "&alias=$alias" if defined $alias && $alias ne '';
+            $url .= "&myip=$ipv4"   if $ipv4;
+            $url .= "&myip=no"      if !$ipv4 && $ipv6;  # prevent server auto-detecting v4
+            $url .= "&myipv6=$ipv6" if $ipv6;
+            my $reply = geturl(
+                proxy    => opt('proxy'),
+                url      => $url,
+                login    => $gcfg{'login'},
+                password => $gcfg{'password'},
+            );
+            next if !header_ok($reply);
+            (my $body = $reply) =~ s/^.*?\n\n//s;
+            my ($status) = split(/\s/, $body);
+            $status //= 'unknown';
+            if ($status eq 'nochg') {
+                warning("$status: $errors{$status}");
+                $status = 'good';
+            }
+            $recap{$h}{'status-ipv4'} = $status if $ipv4;
+            $recap{$h}{'status-ipv6'} = $status if $ipv6;
+            if ($status ne 'good') {
+                failed(exists($errors{$status})
+                    ? "$status: $errors{$status}"
+                    : "unknown error: $status");
+                next;
+            }
+            $recap{$h}{'ipv4'}  = $ipv4 if $ipv4;
+            $recap{$h}{'ipv6'}  = $ipv6 if $ipv6;
+            $recap{$h}{'mtime'} = $now;
+            success("IPv4 address set to $ipv4") if $ipv4;
+            success("IPv6 address set to $ipv6") if $ipv6;
+        }
     }
 }
 
@@ -4630,7 +5034,8 @@ sub nic_easydns_update {
         'NO_AUTH' => 'Authentication failed. This happens if the username/password OR host or domain are wrong.',
         'NOSERVICE' => 'Dynamic DNS is not turned on for this domain.',
         'ILLEGAL INPUT' => 'Client sent data that is not allowed in a dynamic DNS update.',
-        'TOOSOON' => 'Update frequency is too short.',
+        'TOOSOON' => 'Update frequency is too high.',
+        'TOO_FREQ' => 'Update frequency is too high.',
     );
     for my $h (@_) {
         local $_l = pushlogctx($h);
@@ -4654,8 +5059,12 @@ sub nic_easydns_update {
                 failed("could not connect to " . opt('server', $h));
                 next;
             };
-            my $resultcode_re = join('|', map({quotemeta} 'NOERROR', keys(%errors)));
-            my ($status) = $body =~ qr/\b($resultcode_re)\b/;
+            # strip $body of HTML tags (replace with whitespace so tokens don't get concatenated)
+            $body =~ s/<[^>]*>/ /g;
+            $body =~ s/\s+/ /g;
+            my $resultcode_re = join('|', map({quotemeta} 'NOERROR', 'OK', keys(%errors)));
+            my $status = '';
+            ($status) = $body =~ qr/\b($resultcode_re)\b/;
             # 'good' is the only status value that ddclient considers to be successful.  All other
             # values are considered to be failures and will result in frequent retries (every
             # min-error-interval, which defaults to 5m).
@@ -5092,25 +5501,23 @@ sub nic_njalla_update {
 sub nic_sitelutions_examples {
     my $self = shift;
     return <<"EoEXAMPLE";
-
 o 'sitelutions'
 
-The 'sitelutions' protocol is used by DNS services offered by www.sitelutions.com.
+The 'sitelutions' protocol is used by DNS services offered by api2.sitelutions.com.
 
 Configuration variables applicable to the 'sitelutions' protocol are:
   protocol=sitelutions         ##
-  server=fqdn.of.service       ## defaults to sitelutions.com
-  login=service-login          ## login name and password  registered with the service
-  password=service-password    ##
-  A_record_id                  ## Id of the A record for the host registered with the service.
+  server=fqdn.of.service       ## can be omitted, defaults to api2.sitelutions.com
+  login=service-login          ## account email address
+  password=service-password    ## account password
+  ttl=300                      ## record TTL in seconds (optional)
+  A_record_id                  ## numeric ID of the A record to update
 
 Example ${program}.conf file entries:
-  ## single host update
-  protocol=sitelutions,                                         \\
-  login=my-sitelutions.com-login,                               \\
-  password=my-sitelutions.com-password                          \\
-  my-sitelutions.com-id_of_A_record
-
+  protocol=sitelutions,        \\
+  login=me\@example.com,       \\
+  password=my-password         \\
+  12345678
 EoEXAMPLE
 }
 ######################################################################
@@ -5118,15 +5525,13 @@ EoEXAMPLE
 ##
 ## written by Mike W. Smith
 ##
-## based on https://www.sitelutions.com/help/dynamic_dns_clients#updatespec
-## needs this url to update:
-## https://www.sitelutions.com/dnsup?id=990331&user=myemail@mydomain.com&pass=SecretPass&ip=192.168.10.4
-## domain=domain.com&password=domain_password&ip=your_ip
+## based on https://sitelutions.com/index.php?rp=/knowledgebase/4/Setting-up-Dynamic-DNS.html
+## update URL format:
+## https://api2.sitelutions.com/dnsup?id=RECORD_ID&user=EMAIL&pass=PASSWORD&ip=IP[&ttl=TTL]
 ##
 ######################################################################
 sub nic_sitelutions_update {
     my $self = shift;
-    ## update each configured host
     for my $h (@_) {
         local $_l = pushlogctx($h);
         my $ip = delete $config{$h}{'wantip'};
@@ -5139,6 +5544,7 @@ sub nic_sitelutions_update {
         $url .= '&pass=' . opt('password', $h);
         $url .= "&ip=";
         $url .= $ip if $ip;
+        $url .= '&ttl=' . opt('ttl', $h) if defined(opt('ttl', $h));
 
         my $reply = geturl(proxy => opt('proxy'), url => $url);
         next if !header_ok($reply);
@@ -5726,6 +6132,382 @@ sub nic_mythicdyn_update {
 }
 
 ######################################################################
+## nic_ns1_examples
+######################################################################
+sub nic_ns1_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'ns1'
+
+The 'ns1' protocol is used by NS1 / IBM NS1 Connect (ns1.com).
+
+Before configuring, create an API key in the NS1 portal (my.nsone.net) under
+Account Settings > Users & Teams > API Keys with DNS read and write permissions.
+
+Configuration variables applicable to the 'ns1' protocol are:
+  protocol=ns1                 ##
+  server=fqdn.of.service       ## can be omitted, defaults to api.nsone.net/v1
+  zone=dns.zone                ## optional; root DNS zone.  Inferred from hostname if omitted.
+  login=service-login          ## NS1 API key
+  ttl=seconds                  ## optional; DNS record TTL in seconds.  Defaults to 300.
+  fully.qualified.host         ## the host registered with the service.
+
+Example \${program}.conf file entries:
+  protocol=ns1                                                 \\
+  login=myapikey                                               \\
+  zone=example.com                                             \\
+  myhost.example.com
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_ns1_update
+######################################################################
+sub nic_ns1_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+        my $domain;
+        if (opt('zone', $h)) {
+            $domain = opt('zone', $h);
+            if ($h !~ /(?:^|\.)\Q$domain\E$/) {
+                failed("hostname '$h' does not end with zone '$domain'");
+                next;
+            }
+        } else {
+            my @labels = split(/\./, $h);
+            if (@labels < 2) {
+                failed("cannot infer zone from '$h': no dot in hostname; use zone=");
+                next;
+            }
+            $domain = @labels == 2 ? $h : (split(/\./, $h, 2))[1];
+        }
+
+        for my $ipv ('4', '6') {
+            my $ip = delete $config{$h}{"wantipv$ipv"} or next;
+            my $rrtype = $ipv eq '4' ? 'A' : 'AAAA';
+            info("setting IPv$ipv address to $ip");
+
+            my $get_resp = _ns1_call(
+                server  => opt('server', $h),
+                method  => 'GET',
+                path    => "/zones/$domain/$h/$rrtype",
+                api_key => opt('login', $h),
+            );
+
+            if (!defined $get_resp) {
+                $recap{$h}{"status-ipv$ipv"} = 'failed';
+                next;
+            }
+
+            my $ttl  = opt('ttl', $h);
+            my $body = encode_json({
+                answers => [{ answer => [$ip] }],
+                ttl     => $ttl + 0,
+            });
+
+            my $exists      = ref($get_resp) eq 'HASH' && exists $get_resp->{type};
+            my $update_resp = _ns1_call(
+                server  => opt('server', $h),
+                method  => $exists ? 'POST' : 'PUT',
+                path    => "/zones/$domain/$h/$rrtype",
+                api_key => opt('login', $h),
+                body    => $body,
+            );
+
+            if (!defined $update_resp) {
+                $recap{$h}{"status-ipv$ipv"} = 'failed';
+                next;
+            }
+
+            $recap{$h}{"ipv$ipv"}        = $ip;
+            $recap{$h}{'mtime'}          = $now;
+            $recap{$h}{"status-ipv$ipv"} = 'good';
+            success("IPv$ipv address set to $ip");
+        }
+    }
+}
+
+######################################################################
+## _ns1_call: make an authenticated NS1 API call
+######################################################################
+sub _ns1_call {
+    my (%args) = @_;
+    my $server  = delete $args{server};
+    my $method  = delete $args{method};
+    my $path    = delete $args{path};
+    my $api_key = delete $args{api_key};
+    my $body    = delete $args{body} // '';
+
+    my $url   = "$server$path";
+    my $reply = geturl(
+        proxy   => opt('proxy'),
+        url     => $url,
+        method  => $method,
+        headers => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            "X-NSONE-Key: $api_key",
+        ],
+        ($body ? (data => $body) : ()),
+    );
+
+    if (!$reply) {
+        failed("could not connect to $server");
+        return undef;
+    }
+
+    my ($status) = ($reply =~ m{^HTTP/\S+\s+(\d+)}i);
+    if (!defined $status) {
+        failed("unexpected HTTP response from $server");
+        return undef;
+    }
+    (my $resp_body = $reply) =~ s/^.*?\n\n//s;
+    $resp_body =~ s/^\s+|\s+$//g;
+
+    if ($status == 404 && $method eq 'GET') {
+        return {};
+    }
+
+    if ($status !~ /^2/) {
+        my $detail = '';
+        if ($resp_body) {
+            my $parsed = eval { decode_json($resp_body) };
+            $detail = ": $parsed->{message}"
+                if ref($parsed) eq 'HASH' && defined $parsed->{message};
+        }
+        failed("API error $status$detail");
+        return undef;
+    }
+
+    return {} if !$resp_body;
+
+    my $parsed = eval { decode_json($resp_body) };
+    if (!defined $parsed) {
+        failed("unexpected API response: $resp_body");
+        return undef;
+    }
+    return $parsed;
+}
+
+######################################################################
+## nic_netcup_examples
+######################################################################
+sub nic_netcup_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'netcup'
+
+The 'netcup' protocol is used by the Netcup DNS service (www.netcup.de).
+
+Before configuring, generate an API key and API password in the Netcup Customer
+Control Panel (CCP) under Master Data > API.
+
+Configuration variables applicable to the 'netcup' protocol are:
+  protocol=netcup              ##
+  server=fqdn.of.service       ## can be omitted, defaults to ccp.netcup.net
+  zone=dns.zone                ## the DNS zone to update
+  login=customer-number        ## Netcup customer number
+  password=api-password        ## Netcup API password
+  apikey=api-key               ## Netcup API key
+  ttl=seconds                  ## optional; DNS record TTL in seconds.  Defaults to 3600.
+  fully.qualified.host         ## the host registered with the service.
+
+Example \${program}.conf file entries:
+  protocol=netcup                                              \\
+  login=12345                                                  \\
+  password='my-api-password'                                   \\
+  apikey=my-api-key                                            \\
+  zone=example.com                                             \\
+  myhost.example.com
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_netcup_update
+######################################################################
+sub nic_netcup_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+
+        my $zone = opt('zone', $h);
+        if (!$zone) {
+            failed("zone is required for netcup");
+            next;
+        }
+
+        (my $hostname = $h) =~ s/\Q.$zone\E$//;
+        if ($hostname eq $h) {
+            if ($h eq $zone) {
+                $hostname = '@';
+            } else {
+                failed("hostname '$h' does not end with zone '$zone'");
+                next;
+            }
+        }
+
+        my $ipv4 = delete $config{$h}{'wantipv4'};
+        my $ipv6 = delete $config{$h}{'wantipv6'};
+
+        for my $ipv ('4', '6') {
+            next if ($ipv eq '4' && !$ipv4);
+            next if ($ipv eq '6' && !$ipv6);
+            $recap{$h}{"status-ipv$ipv"} = 'failed';
+        }
+
+        # Determine which IPs we are actually updating
+        my @updates;
+        push @updates, ['4', 'A',    $ipv4] if $ipv4;
+        push @updates, ['6', 'AAAA', $ipv6] if $ipv6;
+        next unless @updates;
+
+        # Step 1: Login (one session for all updates on this host)
+        my $session_id = _netcup_login($h, $zone);
+        next unless defined $session_id;
+
+        # Step 2: For each IP version, get records, update, done
+        for my $upd (@updates) {
+            my ($ipv, $rrtype, $ip) = @$upd;
+            info("setting IPv$ipv address to $ip");
+
+            # Get current DNS records for the zone
+            my $records_resp = _netcup_call($h, $zone, $session_id, 'infoDnsRecords', {
+                domainname => $zone,
+            });
+            if (!defined $records_resp) {
+                # status already 'failed' from _netcup_call
+                next;
+            }
+
+            my @records = @{$records_resp->{dnsrecords} // []};
+
+            # Find the matching record
+            my ($existing) = grep {
+                ($_->{hostname} // '') eq $hostname && ($_->{type} // '') eq $rrtype
+            } @records;
+
+            # Build the updated record
+            my %rec = (
+                hostname     => $hostname,
+                type         => $rrtype,
+                destination  => $ip,
+                deleterecord => JSON::PP::false(),
+                state        => 'yes',
+            );
+            $rec{id} = $existing->{id} if $existing;
+
+            my $update_resp = _netcup_call($h, $zone, $session_id, 'updateDnsRecords', {
+                domainname    => $zone,
+                dnsrecordset  => { dnsrecords => [\%rec] },
+            });
+            if (!defined $update_resp) {
+                next;
+            }
+
+            $recap{$h}{"ipv$ipv"}        = $ip;
+            $recap{$h}{'mtime'}          = $now;
+            $recap{$h}{"status-ipv$ipv"} = 'good';
+            success("IPv$ipv address set to $ip");
+        }
+
+        # Step 4: Logout
+        _netcup_call($h, $zone, $session_id, 'logout', {});
+    }
+}
+
+######################################################################
+## _netcup_login: authenticate and return a session ID
+######################################################################
+sub _netcup_login {
+    my ($h, $zone) = @_;
+    my $resp = _netcup_call($h, $zone, undef, 'login', {});
+    return undef unless defined $resp;
+    my $session_id = $resp->{apisessionid};
+    if (!$session_id) {
+        failed("netcup login did not return apisessionid");
+        return undef;
+    }
+    return $session_id;
+}
+
+######################################################################
+## _netcup_call: make a single Netcup JSON-RPC API call
+######################################################################
+sub _netcup_call {
+    my ($h, $zone, $session_id, $action, $extra_params) = @_;
+
+    my $url = opt('server', $h) . "/run/webservice/servers/endpoint.php";
+
+    my %params = (
+        customernumber => opt('login', $h),
+        apikey         => opt('apikey', $h),
+        %{$extra_params // {}},
+    );
+    if ($action ne 'login') {
+        $params{apisessionid} = $session_id;
+    } else {
+        $params{apipassword} = opt('password', $h);
+    }
+
+    my $body = encode_json({
+        action => $action,
+        param  => \%params,
+    });
+
+    my $reply = geturl(
+        proxy   => opt('proxy'),
+        url     => $url,
+        method  => 'POST',
+        headers => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ],
+        data    => $body,
+    );
+
+    if (!$reply) {
+        failed("could not connect to " . opt('server', $h));
+        return undef;
+    }
+
+    my ($status) = ($reply =~ m{^HTTP/\S+\s+(\d+)}i);
+    if (!defined $status) {
+        failed("unexpected HTTP response from " . opt('server', $h));
+        return undef;
+    }
+
+    (my $resp_body = $reply) =~ s/^.*?\n\n//s;
+    $resp_body =~ s/^\s+|\s+$//g;
+
+    if ($status !~ /^2/) {
+        failed("API HTTP error $status");
+        return undef;
+    }
+
+    if ($action eq 'logout') {
+        # Ignore logout response body
+        return {};
+    }
+
+    my $parsed = eval { decode_json($resp_body) };
+    if (!defined $parsed) {
+        failed("unexpected API response: $resp_body");
+        return undef;
+    }
+
+    if (($parsed->{status} // '') ne 'success') {
+        my $msg = $parsed->{longmessage} // $parsed->{shortmessage} // 'unknown error';
+        failed("API error: $msg");
+        return undef;
+    }
+
+    return $parsed->{responsedata} // {};
+}
+
+######################################################################
 ## nic_nsupdate_examples
 ######################################################################
 sub nic_nsupdate_examples {
@@ -5769,6 +6551,51 @@ Example ${program}.conf file entries:
   zone=dyn.example.com \\
   ttl=3600 \\
   myhost.dyn.example.com
+
+  ## PowerDNS Authoritative Server (https://doc.powerdns.com/authoritative/dnsupdate.html)
+  ## Requires RFC 2136 DNS UPDATE enabled and a TSIG key (see ddns-confgen(8)).
+  protocol=nsupdate \\
+  server=ns1.example.com \\
+  password=/etc/${program}/dyn.example.com.key \\
+  zone=dyn.example.com \\
+  ttl=3600 \\
+  myhost.dyn.example.com
+
+  ## ISC BIND (https://www.isc.org/bind/)
+  ## Configure allow-update or update-policy in named.conf for the zone.
+  protocol=nsupdate \\
+  server=ns1.example.com \\
+  password=/etc/${program}/dyn.example.com.key \\
+  zone=dyn.example.com \\
+  ttl=3600 \\
+  myhost.dyn.example.com
+
+  ## Knot DNS (https://www.knot-dns.cz/)
+  ## Configure update-in and a TSIG key in knot.conf.
+  protocol=nsupdate \\
+  server=ns1.example.com \\
+  password=/etc/${program}/dyn.example.com.key \\
+  zone=dyn.example.com \\
+  ttl=3600 \\
+  myhost.dyn.example.com
+
+  ## Technitium DNS Server (https://technitium.com/dns/)
+  ## Configure a Dynamic Updates RFC 2136 security policy in the Technitium web UI.
+  protocol=nsupdate \\
+  server=your.technitium.host \\
+  password=/etc/${program}/dyn.example.com.key \\
+  zone=dyn.example.com \\
+  ttl=3600 \\
+  myhost.dyn.example.com
+
+  ## DynV6 (https://dynv6.com) via RFC 2136
+  ## Obtain your TSIG key from DynV6 zone settings.
+  protocol=nsupdate \\
+  server=ns1.dynv6.com \\
+  password=/etc/${program}/dynv6.key \\
+  zone=your-zone.dynv6.net \\
+  ttl=600 \\
+  myhost.your-zone.dynv6.net
 
 EoEXAMPLE
 }
@@ -5844,6 +6671,78 @@ EoINSTR4
 ######################################################################
 
 ######################################################################
+## _cloudflare_decode_punycode_label
+##
+## Decodes a single punycode-encoded DNS label (RFC 3492) to a Unicode
+## string. Input is the label with the 'xn--' prefix already stripped.
+## Used to normalise IDN zone names before comparing with Cloudflare's
+## API, which always returns zone names in Unicode form.
+######################################################################
+sub _cloudflare_decode_punycode_label {
+    my ($encoded) = @_;
+    my ($BASE, $TMIN, $TMAX, $SKEW, $DAMP, $IBIAS, $IN)
+        = (36, 1, 26, 38, 700, 72, 128);
+
+    my $adapt = sub {
+        my ($delta, $npts, $first) = @_;
+        $delta = $first ? int($delta / $DAMP) : ($delta >> 1);
+        $delta += int($delta / $npts);
+        my $k = 0;
+        while ($delta > int(($BASE - $TMIN) * $TMAX / 2)) {
+            $delta = int($delta / ($BASE - $TMIN));
+            $k += $BASE;
+        }
+        return $k + int(($BASE - $TMIN + 1) * $delta / ($delta + $SKEW));
+    };
+    my $dv = sub {
+        my $c = ord(lc($_[0]));
+        return $c - 97 if $c >= 97 && $c <= 122;   # a-z → 0-25
+        return $c - 22 if $c >= 48 && $c <= 57;    # 0-9 → 26-35
+        die "invalid punycode digit: '$_[0]'";
+    };
+
+    my $delim = rindex($encoded, '-');
+    my @out   = map { ord($_) } split(//, $delim >= 0 ? substr($encoded, 0, $delim) : '');
+    my @chars = split(//, $delim >= 0 ? substr($encoded, $delim + 1) : $encoded);
+
+    my ($n, $i, $bias) = ($IN, 0, $IBIAS);
+    my $pos = 0;
+    while ($pos < @chars) {
+        my $oldi = $i;
+        my $w    = 1;
+        for (my $k = $BASE; ; $k += $BASE) {
+            die "truncated punycode sequence" if $pos >= @chars;
+            my $d = $dv->($chars[$pos++]);
+            $i += $d * $w;
+            my $t = $k <= $bias ? $TMIN : $k >= $bias + $TMAX ? $TMAX : $k - $bias;
+            last if $d < $t;
+            $w *= ($BASE - $t);
+        }
+        my $npts = @out + 1;
+        $bias = $adapt->($i - $oldi, $npts, $oldi == 0);
+        $n   += int($i / $npts);
+        $i   %= $npts;
+        splice @out, $i, 0, $n;
+        $i++;
+    }
+    return join '', map { chr($_) } @out;
+}
+
+######################################################################
+## _cloudflare_zone_to_unicode
+##
+## Converts a DNS zone name from punycode (ACE) to Unicode, label by
+## label. Labels not starting with 'xn--' are passed through unchanged.
+######################################################################
+sub _cloudflare_zone_to_unicode {
+    my ($zone) = @_;
+    return $zone unless $zone =~ /(?:^|\.)xn--/i;
+    return join '.', map {
+        /^xn--(.+)$/i ? (eval { _cloudflare_decode_punycode_label($1) } // $_) : $_
+    } split(/\./, $zone);
+}
+
+######################################################################
 ## nic_cloudflare_examples
 ##
 ## written by Ian Pye
@@ -5856,11 +6755,22 @@ o 'cloudflare'
 
 The 'cloudflare' protocol is used by DNS service offered by www.cloudflare.com.
 
-Configuration variables applicable to the 'cloudflare' protocol are:
+The protocol can be configured in two ways, either using API Token authentication
+(recommended) or using Global API Key authentication (legacy). Depending on the
+chosen authentication method, the configuration variables applicable to the
+'cloudflare' protocol are:
+
+  API Token authentication (recommended):
   protocol=cloudflare          ##
   server=fqdn.of.service       ## defaults to api.cloudflare.com/client/v4
-  login=service-login          ## login email when using a global API key
-  password=service-password    ## Global API key, or an API token. If using an API token, it must have the permissions "Zone - DNS - Edit" and "Zone - Zone - Read". The Zone resources must be "Include - All zones".
+  password=your-api-token      ## API token with Zone:DNS:Edit and Zone:Zone:Read permissions for the zone
+  fully.qualified.host         ## the host registered with the service.
+
+  Global API Key authentication (legacy)
+  protocol=cloudflare          ##
+  server=fqdn.of.service       ## defaults to api.cloudflare.com/client/v4
+  login=service-login          ## Cloudflare login email
+  password=your-global-key     ## Global API key
   fully.qualified.host         ## the host registered with the service.
 
 Example ${program}.conf file entries:
@@ -5911,8 +6821,10 @@ sub nic_cloudflare_update {
 
             info('getting Cloudflare Zone ID');
 
+            my $server = opt('server', $domain);
+
             # Get zone ID
-            my $url = "https://" . opt('server', $domain) . "/zones/?";
+            my $url = "${server}/zones/?";
             $url .= "name=" . opt('zone', $domain);
 
             my $reply = geturl(proxy => opt('proxy'),
@@ -5920,16 +6832,21 @@ sub nic_cloudflare_update {
                                headers => $headers
                               );
             next if !header_ok($reply);
-            # Strip header
-            $reply =~ qr/{(?:[^{}]*|(?R))*}/mp;
-            my $response = eval {decode_json(${^MATCH})};
+            # Conditional match required: ${^MATCH} is not reset on failure and would
+            # retain the value from the previous successful match, causing stale JSON
+            # to be decoded instead of reaching the 'invalid json or result' path.
+            my $response = ($reply =~ qr/{(?:[^{}]*|(?R))*}/mp) ? eval {decode_json(${^MATCH})} : undef;
             unless ($response && $response->{result}) {
                 failed("invalid json or result");
                 next;
             }
 
-            # Pull the ID out of the json, messy
-            my ($zone_id) = map {$_->{name} eq opt('zone', $domain) ? $_->{id} : ()} @{$response->{result}};
+            # Pull the ID out of the json, messy.
+            # Cloudflare always returns zone names in Unicode; normalise the
+            # configured zone (which may be in punycode for IDN domains) before
+            # comparing so that e.g. xn--mnchen-3ya.de matches münchen.de.
+            my $zone_unicode = _cloudflare_zone_to_unicode(opt('zone', $domain));
+            my ($zone_id) = map {$_->{name} eq $zone_unicode ? $_->{id} : ()} @{$response->{result}};
             unless ($zone_id) {
                 failed("no zone ID found for zone " . opt('zone', $domain));
                 next;
@@ -5947,7 +6864,7 @@ sub nic_cloudflare_update {
                 $recap{$domain}{"status-ipv$ipv"} = 'failed';
 
                 # Get DNS 'A' or 'AAAA' record ID
-                $url = "https://" . opt('server', $domain) . "/zones/$zone_id/dns_records?";
+                $url = "${server}/zones/$zone_id/dns_records?";
                 $url .= "type=$type&name=$domain";
                 $reply = geturl(proxy => opt('proxy'),
                                 url => $url,
@@ -5955,8 +6872,7 @@ sub nic_cloudflare_update {
                                );
                 next if !header_ok($reply);
                 # Strip header
-                $reply =~ qr/{(?:[^{}]*|(?R))*}/mp;
-                $response = eval {decode_json(${^MATCH})};
+                $response = ($reply =~ qr/{(?:[^{}]*|(?R))*}/mp) ? eval {decode_json(${^MATCH})} : undef;
                 unless ($response && $response->{result}) {
                     failed("invalid json or result");
                     next;
@@ -5969,7 +6885,7 @@ sub nic_cloudflare_update {
                 }
                 debug("DNS '$type' record ID: $dns_rec_id");
                 # Set domain
-                $url = "https://" . opt('server', $domain) . "/zones/$zone_id/dns_records/$dns_rec_id";
+                $url = "${server}/zones/$zone_id/dns_records/$dns_rec_id";
                 my $data = "{\"content\":\"$ip\"}";
                 $reply = geturl(proxy => opt('proxy'),
                                 url => $url,
@@ -5979,8 +6895,7 @@ sub nic_cloudflare_update {
                                );
                 next if !header_ok($reply);
                 # Strip header
-                $reply =~ qr/{(?:[^{}]*|(?R))*}/mp;
-                $response = eval {decode_json(${^MATCH})};
+                $response = ($reply =~ qr/{(?:[^{}]*|(?R))*}/mp) ? eval {decode_json(${^MATCH})} : undef;
                 if ($response && $response->{result}) {
                     success("IPv$ipv address set to $ip");
                     $recap{$domain}{"ipv$ipv"} = $ip;
@@ -6035,6 +6950,7 @@ sub nic_hetzner_update {
 
         my $zone = opt('zone', $domain);
         (my $hostname = $domain) =~ s/\Q.$zone\E$//;
+        $hostname = '@' if $hostname eq $domain;
         my $ipv4 = delete $config{$domain}{'wantipv4'};
         my $ipv6 = delete $config{$domain}{'wantipv6'};
 
@@ -6049,7 +6965,8 @@ sub nic_hetzner_update {
             $recap{$domain}{"status-ipv$ipv"} = 'failed';
 
             # Get DNS 'A' or 'AAAA' record ID
-            my $url = "https://" . opt('server', $domain) . "/zones/$zone/rrsets/$hostname/$type";
+            my $server = opt('server', $domain);
+            my $url = "$server/zones/$zone/rrsets/$hostname/$type";
             my $reply = geturl(proxy => opt('proxy'),
                             url => $url,
                             headers => $headers
@@ -6080,12 +6997,12 @@ sub nic_hetzner_update {
             if ($response)
             {
                 debug("DNS '$type' record ID: $response->{rrset}->{id}");
-                $url = "https://" . opt('server', $domain) . "/zones/$zone/rrsets/$hostname/$type/actions/set_records";
+                $url = "$server/zones/$zone/rrsets/$hostname/$type/actions/set_records";
                 $http_method = "POST";
                 $data = "{\"records\": [{\"value\": \"$ip\"}]}";
             } else {
                 debug("creating DNS '$type'");
-                $url = "https://" . opt('server', $domain) . "/zones/$zone/rrsets";
+                $url = "$server/zones/$zone/rrsets";
                 $http_method = "POST";
                 $data = "{\"name\":\"$hostname\",\"type\":\"$type\",\"ttl\":" . opt('ttl', $domain) . ",\"records\":[{\"value\":\"$ip\"}]}";
             }
@@ -6108,7 +7025,7 @@ sub nic_hetzner_update {
             my $action_id = $response->{action}->{id};
 
             # Get action status
-            $url = "https://" . opt('server', $domain) . "/actions/$action_id";
+            $url = "$server/actions/$action_id";
             my $max_tries = 5;
 
             for (my $try_number = 1; $try_number <= $max_tries; $try_number++) {
@@ -6442,16 +7359,21 @@ dynamic DNS service offered by www.duckdns.org.
 Check https://www.duckdns.org/install.jsp?tab=linux-cron for API
 
 Configuration variables applicable to the 'duckdns' protocol are:
-  protocol=duckdns               ##
+  protocol=duckdns             ##
   server=www.fqdn.of.service   ## defaults to www.duckdns.org
   password=service-password    ## password (token) registered with the service
-  non-fully.qualified.host         ## the host registered with the service.
+  non-fully.qualified.host     ## the host registered with the service.
 
 Example ${program}.conf file entries:
   ## single host update
   protocol=duckdns,        \\
-  password=your_password,  \\
+  password=your_password   \\
   myhost
+
+  ## multiple host update
+  protocol=duckdns,        \\
+  password=your_password   \\
+  myhost,myhost2
 
 EoEXAMPLE
 }
@@ -6498,6 +7420,114 @@ sub nic_duckdns_update {
         }
         success("IPv4 address set to $ipv4") if $ipv4;
         success("IPv6 address set to $ipv6") if $ipv6;
+    }
+}
+
+######################################################################
+## nic_dynadot_examples
+######################################################################
+sub nic_dynadot_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'dynadot'
+
+The 'dynadot' protocol is used by the dynamic DNS service offered by
+Dynadot (https://www.dynadot.com/).
+
+Configuration variables applicable to the 'dynadot' protocol are:
+  protocol=dynadot             ##
+  server=www.fqdn.of.service   ## defaults to www.dynadot.com
+  password=ddns-password       ## DDNS password generated at Dynadot DNS Settings
+  zone=example.com             ## the registered domain at Dynadot
+  ttl=300                      ## record TTL in seconds (default 300)
+  on-root-domain=yes|no        ## also update root record when updating a subdomain
+  fully.qualified.host         ## host(s) to update.
+
+Example ${program}.conf file entries:
+  protocol=dynadot,                    \\
+  password=your_dynadot_ddns_password, \\
+  zone=example.com,                    \\
+  myhost.example.com
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_dynadot_update
+## https://www.dynadot.com/set_ddns?containRoot=<bool>&domain=<domain>
+##     &subDomain=<sub>&ip=<ip>&pwd=<pwd>&ttl=<ttl>&type=A|AAAA
+######################################################################
+sub nic_dynadot_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+        my ($domain, $sub_domain);
+        if (opt('zone', $h)) {
+            $domain = opt('zone', $h);
+            $sub_domain = $h;
+            if ($sub_domain eq $domain) {
+                $sub_domain = '';
+            } elsif ($sub_domain !~ s/\.\Q$domain\E$//) {
+                failed("hostname does not end with the 'zone' value: $domain");
+                next;
+            }
+        } elsif ($h =~ /\./) {
+            ($sub_domain, $domain) = split(/\./, $h, 2);
+        } else {
+            $sub_domain = '';
+            $domain = $h;
+        }
+        my $is_root = ($sub_domain eq '');
+        # When updating a subdomain, containRoot defaults to false; the
+        # 'on-root-domain' option lets the user opt in to updating the
+        # root record at the same time. When updating the root itself,
+        # containRoot must be true.
+        my $contain_root = ($is_root || opt('on-root-domain', $h)) ? 'true' : 'false';
+        info("subdomain '$sub_domain', domain '$domain'") unless $is_root;
+        info("root domain '$domain'") if $is_root;
+        my $ipv4 = delete $config{$h}{'wantipv4'};
+        my $ipv6 = delete $config{$h}{'wantipv6'};
+        info("setting IPv4 address to $ipv4") if $ipv4;
+        info("setting IPv6 address to $ipv6") if $ipv6;
+        my $ttl = opt('ttl', $h);
+        my $pwd = opt('password', $h);
+        my @updates;
+        push(@updates, ['A',    $ipv4]) if $ipv4;
+        push(@updates, ['AAAA', $ipv6]) if $ipv6;
+        for my $u (@updates) {
+            my ($type, $ip) = @$u;
+            my $ipv = ($type eq 'A') ? '4' : '6';
+            $recap{$h}{"status-ipv$ipv"} = 'failed';
+            my %form = (
+                containRoot => $contain_root,
+                domain      => $domain,
+                ip          => $ip,
+                pwd         => $pwd,
+                ttl         => $ttl,
+                type        => $type,
+            );
+            $form{'subDomain'} = $sub_domain unless $is_root;
+            my $url = opt('server', $h) . '/set_ddns?'
+                . encode_www_form_urlencoded(\%form);
+            my $reply = geturl(proxy => opt('proxy'), url => $url);
+            next if !header_ok($reply);
+            (my $body = $reply) =~ s/^.*?\n\n//s;
+            chomp($body);
+            if ($body !~ /\bok\b/i) {
+                failed("server said: $body");
+                next;
+            }
+            if ($type eq 'A') {
+                $recap{$h}{'ipv4'} = $ip;
+                $recap{$h}{'status-ipv4'} = 'good';
+                success("IPv4 address set to $ip");
+            } else {
+                $recap{$h}{'ipv6'} = $ip;
+                $recap{$h}{'status-ipv6'} = 'good';
+                success("IPv6 address set to $ip");
+            }
+            $recap{$h}{'mtime'} = $now;
+        }
     }
 }
 
@@ -6601,6 +7631,63 @@ sub nic_ddnsfm_update {
             next if !header_ok($reply);
             $recap{$h}{"ipv$ipv"} = $ip;
             $recap{$h}{'mtime'} = $now;
+            $recap{$h}{"status-ipv$ipv"} = 'good';
+            success("IPv$ipv address set to $ip");
+        }
+    }
+}
+
+######################################################################
+## nic_ddnss_examples
+######################################################################
+sub nic_ddnss_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'ddnss'
+
+The 'ddnss' protocol is used by the free dynamic DNS service at ddnss.de
+using key-based authentication.
+
+Configuration variables applicable to the 'ddnss' protocol are:
+  protocol=ddnss               ##
+  server=fqdn.of.service       ## can be omitted, defaults to ddnss.de
+  password=your-api-key        ## API key from ddnss.de account settings
+  fully.qualified.host         ## the host registered with the service.
+
+Example \${program}.conf file entries:
+  protocol=ddnss,                        \\
+  password=your-api-key                  \\
+  myhost.ddnss.de
+EoEXAMPLE
+}
+
+######################################################################
+## nic_ddnss_update
+######################################################################
+sub nic_ddnss_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+        for my $ipv ('4', '6') {
+            my $ip = delete $config{$h}{"wantipv$ipv"} or next;
+            $recap{$h}{"status-ipv$ipv"} = 'failed';
+            my $param = $ipv eq '4' ? "ip=$ip" : "ip6=$ip";
+            info("setting IPv$ipv address to $ip");
+            my $reply = geturl(
+                proxy => opt('proxy'),
+                url   => opt('server', $h) . "/upd.php?key=" . opt('password', $h) . "&host=$h&$param",
+            );
+            next if !header_ok($reply);
+            (my $body = $reply) =~ s/^.*?\n\n//s or do {
+                failed("invalid response from server");
+                next;
+            };
+            if ($body !~ /\bgood\b/i) {
+                failed("server said: $body");
+                next;
+            }
+            $recap{$h}{"ipv$ipv"}        = $ip;
+            $recap{$h}{'mtime'}          = $now;
             $recap{$h}{"status-ipv$ipv"} = 'good';
             success("IPv$ipv address set to $ip");
         }
@@ -6720,6 +7807,88 @@ sub nic_dnsmadeeasy_update {
         $recap{$h}{'mtime'} = $now;
         $recap{$h}{'status'} = 'good';
         success("IP address set to $ip");
+    }
+}
+
+######################################################################
+## nic_simplycom_examples
+######################################################################
+sub nic_simplycom_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+
+o 'simply.com'
+
+The 'simply.com' protocol is used by DNS services offered by www.simply.com.
+
+API information and user instructions available at: https://www.simply.com/docs/api/
+
+Configuration variables applicable to the 'simply.com' protocol are:
+  protocol=simply.com
+  server=fqdn.of.service       ## can be omitted, defaults to dyndns.simply.com
+  login=S124543                ## The Simply.com account that the domain belongs to
+  password=apikey              ## The API key for your Simply.com account
+  zone=example.com             ## The domain you want to update the record on, optional
+  fully.qualified.host         ## the hostname you want to update
+
+Example ${program}.conf file entries:
+  ## single host update
+  protocol=simply.com,      \\
+  login=S124543,            \\
+  password=APIKEY,          \\
+  zone=example.com,         \\
+  test.example.com
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_simplycom_update
+######################################################################
+sub nic_simplycom_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+        my $ipv4 = delete $config{$h}{'wantipv4'};
+        my $ipv6 = delete $config{$h}{'wantipv6'};
+        for my $entry ([$ipv4, '4'], [$ipv6, '6']) {
+            my ($ip, $v) = @$entry;
+            next if !$ip;
+            info("setting IPv$v address to $ip");
+
+            my $url = opt('server', $h) . '/nic/update'
+                . '?hostname=' . $h
+                . '&myip=' . $ip;
+            $url .= '&domain=' . opt('zone', $h) if opt('zone', $h);
+
+            my $reply = geturl(
+                proxy => opt('proxy'),
+                url => $url,
+                login => opt('login', $h),
+                password => opt('password', $h),
+            );
+            if (!header_ok($reply)) {
+                $recap{$h}{"status-ipv$v"} = 'failed';
+                next;
+            }
+
+            (my $body = $reply) =~ s/^.*?\n\n//s;
+            my ($returned) = grep { /^(?:good|nochg)\b/ } split(/\n/, $body);
+            if ($returned) {
+                $recap{$h}{"ipv$v"} = $ip;
+                $recap{$h}{'mtime'} = $now;
+                $recap{$h}{"status-ipv$v"} = 'good';
+                if ($returned =~ /^good\b/) {
+                    success("IPv$v address set to $ip");
+                } else {
+                    warning("nochg: No update required; unnecessary attempts to change the current address are considered abusive");
+                }
+            } else {
+                $recap{$h}{"status-ipv$v"} = 'failed';
+                $body =~ s/\s+\z//;
+                failed("server said: $body");
+            }
+        }
     }
 }
 
@@ -7028,6 +8197,197 @@ sub nic_cloudns_update {
         $recap{$_}{'status'} = 'good' for @hosts;
         success("IP address set to $ip");
     }
+}
+
+######################################################################
+## nic_spaceship_examples
+######################################################################
+sub nic_spaceship_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'spaceship'
+
+The 'spaceship' protocol is used by the Spaceship DNS service (www.spaceship.com).
+
+Before configuring, create an API key in the Spaceship account settings with
+only the 'DNS Records' read and write permissions enabled.
+
+Configuration variables applicable to the 'spaceship' protocol are:
+  protocol=spaceship           ##
+  server=fqdn.of.service       ## can be omitted, defaults to spaceship.dev
+  zone=dns.zone                ## optional; root DNS zone.  Inferred from hostname if omitted.
+  login=service-login          ## Spaceship API key
+  password=service-password    ## Spaceship API secret
+  ttl=seconds                  ## optional; DNS record TTL in seconds.  Defaults to 300.
+  fully.qualified.host         ## the host registered with the service.
+
+Example \${program}.conf file entries:
+  protocol=spaceship                                           \\
+  login=myapikey                                               \\
+  password=myapisecret                                         \\
+  zone=example.com                                             \\
+  myhost.example.com
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_spaceship_update
+######################################################################
+sub nic_spaceship_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+        my ($subdomain, $domain);
+        if (opt('zone', $h)) {
+            $domain    = opt('zone', $h);
+            $subdomain = $h;
+            if ($subdomain !~ s/(?:^|\.)\Q$domain\E$//) {
+                failed("hostname '$h' does not end with zone '$domain'");
+                next;
+            }
+            $subdomain ||= '@';
+        } else {
+            ($subdomain, $domain) = split(/\./, $h, 2);
+            if (!defined $domain) {
+                failed("cannot infer zone from '$h': no dot in hostname; use zone=");
+                next;
+            }
+        }
+
+        for my $ipv ('4', '6') {
+            my $ip = delete $config{$h}{"wantipv$ipv"} or next;
+            my $rrtype = $ipv eq '4' ? 'A' : 'AAAA';
+            info("setting IPv$ipv address to $ip");
+
+            my $list_resp = _spaceship_call(
+                server     => opt('server', $h),
+                method     => 'GET',
+                path       => "/api/v1/dns/records/$domain",
+                query      => 'take=500&skip=0',
+                api_key    => opt('login', $h),
+                api_secret => opt('password', $h),
+            );
+            if (!defined $list_resp) {
+                $recap{$h}{"status-ipv$ipv"} = 'failed';
+                next;
+            }
+
+            my @existing = grep {
+                $_->{type} eq $rrtype && $_->{name} eq $subdomain
+            } @{$list_resp->{items} // []};
+
+            my $ok = 1;
+            for my $rec (@existing) {
+                my $del_resp = _spaceship_call(
+                    server     => opt('server', $h),
+                    method     => 'DELETE',
+                    path       => "/api/v1/dns/records/$domain",
+                    api_key    => opt('login', $h),
+                    api_secret => opt('password', $h),
+                    body       => encode_json([{
+                        type    => $rrtype,
+                        name    => $subdomain,
+                        address => $rec->{address},
+                    }]),
+                );
+                if (!defined $del_resp) {
+                    $recap{$h}{"status-ipv$ipv"} = 'failed';
+                    $ok = 0;
+                    last;
+                }
+            }
+            next unless $ok;
+
+            my $ttl = opt('ttl', $h);
+            my $put_resp = _spaceship_call(
+                server     => opt('server', $h),
+                method     => 'PUT',
+                path       => "/api/v1/dns/records/$domain",
+                api_key    => opt('login', $h),
+                api_secret => opt('password', $h),
+                body       => encode_json({
+                    force => JSON::PP::true(),
+                    items => [{
+                        type    => $rrtype,
+                        name    => $subdomain,
+                        address => $ip,
+                        ttl     => $ttl + 0,
+                    }],
+                }),
+            );
+            if (!defined $put_resp) {
+                $recap{$h}{"status-ipv$ipv"} = 'failed';
+                next;
+            }
+
+            $recap{$h}{"ipv$ipv"}        = $ip;
+            $recap{$h}{'mtime'}          = $now;
+            $recap{$h}{"status-ipv$ipv"} = 'good';
+            success("IPv$ipv address set to $ip");
+        }
+    }
+}
+
+######################################################################
+## _spaceship_call: make an authenticated Spaceship API call
+######################################################################
+sub _spaceship_call {
+    my (%args) = @_;
+    my $server     = delete $args{server};
+    my $method     = delete $args{method};
+    my $path       = delete $args{path};
+    my $query      = delete $args{query} // '';
+    my $api_key    = delete $args{api_key};
+    my $api_secret = delete $args{api_secret};
+    my $body       = delete $args{body} // '';
+
+    my $url = "$server$path" . ($query ? "?$query" : '');
+    my $reply = geturl(
+        proxy   => opt('proxy'),
+        url     => $url,
+        method  => $method,
+        headers => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            "X-Api-Key: $api_key",
+            "X-Api-Secret: $api_secret",
+        ],
+        ($body ? (data => $body) : ()),
+    );
+
+    if (!$reply) {
+        failed("could not connect to $server");
+        return undef;
+    }
+
+    my ($status) = ($reply =~ m{^HTTP/\S+\s+(\d+)}i);
+    if (!defined $status) {
+        failed("unexpected HTTP response from $server");
+        return undef;
+    }
+    (my $resp_body = $reply) =~ s/^.*?\n\n//s;
+    $resp_body =~ s/^\s+|\s+$//g;
+
+    if ($status !~ /^2/) {
+        my $detail = '';
+        if ($resp_body) {
+            my $parsed = eval { decode_json($resp_body) };
+            $detail = ": $parsed->{detail}"
+                if ref($parsed) eq 'HASH' && defined $parsed->{detail};
+        }
+        failed("API error $status$detail");
+        return undef;
+    }
+
+    return {} if !$resp_body;
+
+    my $parsed = eval { decode_json($resp_body) };
+    if (!defined $parsed) {
+        failed("unexpected API response: $resp_body");
+        return undef;
+    }
+    return $parsed;
 }
 
 ######################################################################
@@ -7728,6 +9088,137 @@ Example ${program}.conf file entries:
   host.example.com
 EoEXAMPLE
 }
+
+######################################################################
+## nic_ionos_update
+######################################################################
+sub nic_ionos_update {
+    my $self = shift;
+    for my $h (@_) {
+        local $_l = pushlogctx($h);
+        my $ipv4 = delete $config{$h}{'wantipv4'};
+        my $ipv6 = delete $config{$h}{'wantipv6'};
+        next unless $ipv4 || $ipv6;
+
+        my $headers =
+            "Content-Type: application/json\n" .
+            "accept: application/json\n" .
+            "X-API-Key: " . opt('password', $h) . "\n";
+
+        ## Step 1: Get zone list and find the zone for this host.
+        my $reply = geturl(
+            proxy   => opt('proxy'),
+            url     => opt('server', $h) . "/dns/v1/zones",
+            headers => $headers,
+        );
+        next unless header_ok($reply);
+        (my $body = $reply) =~ s/^.*?\n\n//s;
+        my $zones = eval { decode_json($body) };
+        if ($@ || ref($zones) ne 'ARRAY') {
+            failed("failed to parse IONOS zone list");
+            next;
+        }
+        my ($zone) = grep { $h =~ /(?:^|\.)\Q$_->{name}\E$/ } @$zones;
+        unless ($zone) {
+            failed("no IONOS zone found for $h");
+            next;
+        }
+        my $zone_id = $zone->{id};
+
+        ## Step 2: Get existing records for this host.
+        $reply = geturl(
+            proxy   => opt('proxy'),
+            url     => opt('server', $h)
+                     . "/dns/v1/zones/$zone_id?suffix=$h&recordType=A%2CAAAA",
+            headers => $headers,
+        );
+        next unless header_ok($reply);
+        ($body = $reply) =~ s/^.*?\n\n//s;
+        my $zone_data = eval { decode_json($body) };
+        if ($@ || ref($zone_data) ne 'HASH') {
+            failed("failed to parse IONOS zone records");
+            next;
+        }
+        my $records = $zone_data->{records} // [];
+
+        ## Step 3: Update A and AAAA records.
+        for my $ip ($ipv4, $ipv6) {
+            next unless defined($ip);
+            my $ipv  = ($ip eq ($ipv6 // '')) ? '6' : '4';
+            my $type = $ipv eq '6' ? 'AAAA' : 'A';
+            $recap{$h}{"status-ipv$ipv"} = 'failed';
+
+            my ($rec) = grep {
+                $_->{type} eq $type &&
+                (lc($_->{name}) eq lc($h) || lc($_->{name}) eq lc("$h."))
+            } @$records;
+            my $ttl = opt('ttl', $h) // 300;
+
+            my ($method, $url, $data);
+            if ($rec) {
+                $method = 'PUT';
+                $url    = opt('server', $h) . "/dns/v1/zones/$zone_id/records/$rec->{id}";
+                $data   = encode_json({
+                    content  => $ip,
+                    ttl      => $ttl,
+                    prio     => 0,
+                    disabled => \0,
+                });
+            } else {
+                $method = 'POST';
+                $url    = opt('server', $h) . "/dns/v1/zones/$zone_id/records";
+                $data   = encode_json([{
+                    name     => $h,
+                    type     => $type,
+                    content  => $ip,
+                    ttl      => $ttl,
+                    prio     => 0,
+                    disabled => \0,
+                }]);
+            }
+
+            $reply = geturl(
+                method  => $method,
+                proxy   => opt('proxy'),
+                url     => $url,
+                headers => $headers,
+                data    => $data,
+            );
+            next unless header_ok($reply);
+
+            success("IPv$ipv address set to $ip");
+            $recap{$h}{"ipv$ipv"} = $ip;
+            $recap{$h}{'mtime'}   = $now;
+            $recap{$h}{"status-ipv$ipv"} = 'good';
+        }
+    }
+}
+
+######################################################################
+## nic_ionos_examples
+######################################################################
+sub nic_ionos_examples {
+    my $self = shift;
+    return <<"EoEXAMPLE";
+o 'ionos'
+
+The 'ionos' protocol updates DNS records via the IONOS DNS REST API
+<https://developer.hosting.ionos.com/docs/dns>.
+
+Configuration variables applicable to the 'ionos' protocol are:
+  protocol=ionos             ##
+  password=prefix.secret     ## IONOS DNS API key (prefix.secret format)
+  server=fqdn.of.service     ## can be omitted, defaults to api.hosting.ionos.com
+  ttl=300                    ## record TTL in seconds (optional, default 300)
+  host.example.com           ## the host to update
+
+Example ${program}.conf file entries:
+  protocol=ionos,             \\
+  password=my-api-key-prefix.my-api-key-secret \\
+  host.example.com
+EoEXAMPLE
+}
+
 
 # Execute main() if this file is run as a script or run via PAR (https://metacpan.org/pod/PAR),
 # otherwise do nothing. This "modulino" pattern makes it possible to import this file as a module

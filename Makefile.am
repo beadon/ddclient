@@ -38,6 +38,7 @@ $(subst_files): Makefile
 			-e 's|@confdir[@]|$(confdir)|g' \
 			-e 's|@runstatedir[@]|$(runstatedir)|g' \
 			-e 's|@CURL[@]|$(CURL)|g' \
+			-e 's|@ENABLE_MIGRATION_HINTS[@]|$(ENABLE_MIGRATION_HINTS)|g' \
 			"$${in}" >'$@'.tmp && \
 		{ ! test -x "$${in}" || chmod +x '$@'.tmp; }
 	mv '$@'.tmp '$@'
@@ -76,10 +77,21 @@ handwritten_tests = \
 	t/is-and-extract-ipv6.pl \
 	t/is-and-extract-ipv6-global.pl \
 	t/logmsg.pl \
+	t/jitter.pl \
 	t/parse_assignments.pl \
+	t/protocol_ddnss.pl \
+	t/protocol_cloudflare.pl \
 	t/protocol_directnic.pl \
 	t/protocol_dnsexit2.pl \
+	t/protocol_dynadot.pl \
 	t/protocol_dyndns2.pl \
+	t/protocol_dynu.pl \
+	t/protocol_hetzner.pl \
+	t/protocol_ionos.pl \
+	t/protocol_netcup.pl \
+	t/protocol_ns1.pl \
+	t/protocol_simplycom.pl \
+	t/protocol_spaceship.pl \
 	t/read_recap.pl \
 	t/skip.pl \
 	t/ssl-validate.pl \

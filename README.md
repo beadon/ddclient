@@ -14,10 +14,13 @@ your dynamic DNS provider(s): <https://github.com/troglobit/inadyn> or
 Dynamic DNS services currently supported include:
 
   * [1984.is](https://www.1984.is/product/freedns)
+  * [All-inkl.com](https://all-inkl.com)
   * [ChangeIP](https://www.changeip.com)
   * [CloudFlare](https://www.cloudflare.com)
   * [ClouDNS](https://www.cloudns.net)
   * [DDNS.fm](https://www.ddns.fm/)
+  * [DDNSS.de](https://ddnss.de)
+  * [deSEC](https://desec.io)
   * [DigitalOcean](https://www.digitalocean.com/)
   * [dinahosting](https://dinahosting.com)
   * [Directnic](https://directnic.com)
@@ -28,8 +31,11 @@ Dynamic DNS services currently supported include:
   * [Domeneshop](https://api.domeneshop.no/docs/#tag/ddns/paths/~1dyndns~1update/get)
   * [DslReports](https://www.dslreports.com)
   * [Duck DNS](https://duckdns.org)
+  * [Dynadot](https://www.dynadot.com)
+  * [Dynu](https://www.dynu.com)
   * [DynDNS.com](https://account.dyn.com)
-  * [EasyDNS](https://www.easydns.com )
+  * [DynV6](https://dynv6.com) (via `protocol=dyndns2` or RFC 2136 `protocol=nsupdate`)
+  * [EasyDNS](https://www.easydns.com)
   * [Enom](https://www.enom.com)
   * [Freedns](https://freedns.afraid.org)
   * [Freemyip](https://freemyip.com)
@@ -38,18 +44,31 @@ Dynamic DNS services currently supported include:
   * [Hetzner](https://hetzner.com)
   * [Hurricane Electric](https://dns.he.net)
   * [Infomaniak](https://faq.infomaniak.com/2376)
+  * [ISC BIND](https://www.isc.org/bind/) (via RFC 2136 `protocol=nsupdate`)
   * [INWX](https://www.inwx.com/)
+  * [IONOS](https://ionos.com)
+  * [Joker.com](https://joker.com)
+  * [Knot DNS](https://www.knot-dns.cz/) (via RFC 2136 `protocol=nsupdate`)
   * [Loopia](https://www.loopia.se)
+  * [LuaDNS](https://luadns.com)
   * [Mythic Beasts](https://www.mythic-beasts.com/support/api/dnsv2/dynamic-dns)
   * [NameCheap](https://www.namecheap.com)
   * [NearlyFreeSpeech.net](https://www.nearlyfreespeech.net/services/dns)
+  * [Netcup](https://www.netcup.de)
+  * [NIC.RU](https://www.nic.ru)
   * [Njalla](https://njal.la/docs/ddns)
   * [Noip](https://www.noip.com)
+  * [NS1 / IBM NS1 Connect](https://ns1.com)
   * nsupdate - see nsupdate(1) and ddns-confgen(8)
   * [OVH](https://www.ovhcloud.com)
   * [Porkbun](https://porkbun.com)
+  * [PowerDNS](https://www.powerdns.com) (via [PowerDNS-Admin](https://github.com/PowerDNS-Admin/PowerDNS-Admin) with `protocol=dyndns2`, or via RFC 2136 DNS UPDATE with `protocol=nsupdate`)
   * [regfish.de](https://www.regfish.de/domains/dyndns)
+  * [Simply.com](https://www.simply.com)
   * [Sitelutions](https://www.sitelutions.com)
+  * [Technitium DNS Server](https://technitium.com/dns/) (via RFC 2136 `protocol=nsupdate`)
+  * [UpdatedIP](https://www.updatedip.com)
+  * [WebSupport](https://www.websupport.sk)
   * [Yandex](https://dns.yandex.com)
   * [Zoneedit](https://www.zoneedit.com)
 
@@ -126,6 +145,40 @@ enable automatic startup when booting
 start the first time by hand
 
     systemctl start ddclient.service
+
+### Upgrading from 3.x
+
+#### Config file location changed
+
+ddclient 4.x changed the default config file location from
+`${sysconfdir}/ddclient.conf` (e.g. `/etc/ddclient.conf`) to
+`${sysconfdir}/ddclient/ddclient.conf` (e.g. `/etc/ddclient/ddclient.conf`).
+
+If you are upgrading from 3.x and compiled from source, move your config:
+
+```shell
+sudo mkdir -p /etc/ddclient
+sudo mv /etc/ddclient.conf /etc/ddclient/ddclient.conf
+sudo chmod 600 /etc/ddclient/ddclient.conf
+```
+
+Alternatively, pass `--with-confdir='${sysconfdir}'` to `./configure` to
+keep the old location:
+
+```shell
+./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --with-confdir='${sysconfdir}'
+```
+
+If ddclient starts but does nothing (just sleeps), run
+`ddclient --verbose --debug` and check that `=== config ====` is not empty.
+An empty config section means the config file is not being found.
+
+See the [ChangeLog](ChangeLog.md) for the full list of breaking changes
+between 3.x and 4.x.
 
 ## Known issues
 This is a list for quick referencing of known issues. For further details check out the linked issues and the changelog.

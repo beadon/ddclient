@@ -3,7 +3,90 @@
 This document describes notable changes. For details, see the [source code
 repository history](https://github.com/ddclient/ddclient/commits/main).
 
-## v4.0.1-alpha (unreleased work-in-progress)
+## v4.0.1-rc.2 (unreleased work-in-progress)
+
+### Provider updates
+
+  * `sitelutions`: Update default server to `api2.sitelutions.com` (APIv2); add optional
+    `ttl` configuration variable.
+    [#865](https://github.com/ddclient/ddclient/pull/865)
+
+### Bug fixes
+
+  * `hetzner`: Fix apex-domain updates creating spurious `hostname.zone` DNS records;
+    hostnames equal to the zone are now correctly sent as `@`. Also remove the hardcoded
+    `https://` scheme from URL construction so the `server` option can override it.
+    [#899](https://github.com/ddclient/ddclient/pull/899)
+  * `cloudflare`: Fix zone ID lookup failure for internationalized domain names (IDN)
+    by normalizing both the configured zone and the Cloudflare API response to
+    Unicode before comparison. Harden the punycode decoder to reject malformed
+    labels so that mis-normalized zones fail explicitly rather than silently
+    producing an incorrect zone name.
+    [#905](https://github.com/ddclient/ddclient/pull/905)
+
+### Improvements
+
+  * `--query`: Add a banner explaining that the output is a diagnostic survey
+    of all available IP detection methods, not a reflection of the configured
+    update behavior. Also print the configured `use=`/`usev4=`/`usev6=`
+    values at the end so users can confirm their settings at a glance.
+
+### New feature
+
+  * Added `PowerDNS` as a supported provider for self-hosted deployments:
+    via [PowerDNS-Admin](https://github.com/PowerDNS-Admin/PowerDNS-Admin) using `protocol=dyndns2`,
+    or via PowerDNS Authoritative Server RFC 2136 DNS UPDATE using `protocol=nsupdate`.
+  * Documented `ISC BIND` (https://www.isc.org/bind/), `Knot DNS` (https://www.knot-dns.cz/),
+    and `Technitium DNS Server` (https://technitium.com/dns/) as supported via
+    `protocol=nsupdate` (RFC 2136 DNS UPDATE).
+  * Added `NIC.RU` (https://www.nic.ru) as a supported `dyndns2` provider
+    via `api.nic.ru` for Russian .ru domain dynamic DNS.
+  * Add a jitter to the daemon interval when in daemon mode to spread the web service
+    API calls across clients and reduce load on upstream DNS providers when many
+    clients are running with the same daemon interval.
+    [#888](https://github.com/ddclient/ddclient/pull/888)
+  * Added `simply.com` (https://www.simply.com).
+    [#850](https://github.com/ddclient/ddclient/pull/850)
+  * Added `All-inkl.com` (https://all-inkl.com) as a supported `dyndns2`
+    provider via `dyndns.kasserver.com`. DDNS credentials are created in the
+    KAS control panel under Tools → DDNS Settings.
+  * Added `DynV6` (https://dynv6.com) as a supported provider:
+    via `protocol=dyndns2` (HTTP token authentication, `login=none`),
+    and via `protocol=nsupdate` (RFC 2136) at `ns1.dynv6.com` using a zone TSIG key.
+  * Added `dynu` protocol for Dynu Systems (https://www.dynu.com/), with
+    dual-stack IPv4+IPv6 support and optional `zone=` for custom domain updates.
+    [#904](https://github.com/ddclient/ddclient/pull/904)
+  * Added `WebSupport` (https://www.websupport.sk) as a supported `dyndns2`
+    provider via `dyndns.websupport.sk`.
+  * Added `deSEC` (https://desec.io) and `DDNSS.de` (https://ddnss.de) as
+    supported `dyndns2` providers, with dedicated `desec-ipv4`/`desec-ipv6`
+    web IP check services.
+    [#906](https://github.com/ddclient/ddclient/pull/906)
+  * Added `Joker.com` (https://joker.com) as a supported `dyndns2` provider,
+    with dedicated `joker-ipv4`/`joker-ipv6` web IP check services and
+    dual-stack configuration examples.
+  * Added `ns1` protocol for NS1 / IBM NS1 Connect (https://ns1.com/).
+    [#907](https://github.com/ddclient/ddclient/pull/907)
+  * Added `spaceship` protocol for Spaceship (https://www.spaceship.com/).
+    [#896](https://github.com/ddclient/ddclient/pull/896)
+  * Added `updatedip` built-in web IP check service for UpdatedIP (https://www.updatedip.com).
+    [#868](https://github.com/ddclient/ddclient/pull/868)
+  * Added `dynadot` protocol for Dynadot (https://www.dynadot.com/).
+    [#882](https://github.com/ddclient/ddclient/pull/882)
+  * Added `ddnss` protocol for DDNSS.de (https://ddnss.de) key-based
+    authentication, complementing existing dyndns2 username/password support.
+  * Added `LuaDNS` (https://luadns.com) as a supported `dyndns2` provider
+    via `app.luadns.com`. Use your account email as login and API key as password.
+  * Added `netcup` protocol for Netcup (https://www.netcup.de).
+
+### Improvements
+
+  * Warn on startup when no hosts are configured, with a hint about the old 3.x
+    config file location (`${sysconfdir}/ddclient.conf`) when a file is found
+    there but the new location (`${sysconfdir}/ddclient/ddclient.conf`) is empty.
+    Packagers that handle config migration through other means can suppress the
+    hint by passing `--disable-migration-hints` to `./configure`.
+    [#903](https://github.com/ddclient/ddclient/pull/903)
 
 ## 2026-05-16 v4.0.1-rc.1
 
@@ -154,6 +237,8 @@ repository history](https://github.com/ddclient/ddclient/commits/main).
     option.  [#752](https://github.com/ddclient/ddclient/pull/752)
   * `dnsexit2`: Multiple hosts are updated in a single API call when possible.
     [#684](https://github.com/ddclient/ddclient/pull/684)
+  * `ionos`: Add IONOS Zones support for A- and AAAA-records.
+    [#863](https://github.com/ddclient/ddclient/pull/863)
 
 ### Bug fixes
 
