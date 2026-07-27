@@ -5099,7 +5099,7 @@ The 'namecheap' protocol is used by DNS service offered by www.namecheap.com.
 Configuration variables applicable to the 'namecheap' protocol are:
   protocol=namecheap           ##
   server=fqdn.of.service       ## defaults to dynamicdns.park-your-domain.com
-  login=service-login          ## the domain of the dynamic DNS record you want to update
+  login=service-login          ## the full domain name (with TLD) of the dynamic DNS record, e.g. example.com
   password=service-password    ## Generated password for your dynamic DNS record
   hostname                     ## the subdomain to update, use @ for base domain name, * for catch all
 
@@ -5136,7 +5136,11 @@ sub nic_namecheap_update {
         $url = 'https://' . opt('server', $h) . '/update';
         my $domain = opt('login', $h);
         my $host   = $h;
-        $host =~ s/(.*)\.$domain(.*)/$1$2/;
+        unless ($host =~ s/(?:^|\.)\Q$domain\E$//) {
+            failed("host '$h' does not end with the configured login domain '$domain'; login= must be the full domain name (e.g. 'example.com')");
+            next;
+        }
+        $host = '@' if $host eq '';
         $url .= "?host=$host";
         $url .= "&domain=$domain";
         $url .= '&password=' . opt('password', $h);
